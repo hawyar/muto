@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { S3Client, S3ClientConfig } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
 type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_" | "|";
 type env = 'local' | 'aws';
 type connectorType = S3Client | fs.ReadStream;
@@ -49,24 +49,18 @@ declare class Workflow {
      */
     list(): Dataset[];
     /**
+     * Removes dataset from the workflow
+     * @param source
+     * @param options
+     */
+    remove(dataset: Dataset): void;
+    /**
      * Adds a dataset to workflow
      * @param source
      * @param options
      * @returns
      */
-    add(source: string, opt: Options): Promise<unknown>;
-    /**
-     * Connects to given path directory in the filesystem
-     * @param path
-     * @returns {fs.Dirent[]}
-     */
-    fsConnector(path: string): fs.Dirent[];
-    /**
-     * Creates a new S3 client
-     * @param opt - S3 client config
-     * @returns S3Client
-     */
-    s3Connector(opt: S3ClientConfig): S3Client;
+    add(source: string, opt: Options): Promise<Dataset | Error>;
 }
 /**
  * Returns a new workflow

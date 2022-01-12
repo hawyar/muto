@@ -1,6 +1,6 @@
-import {createReadStream as $a0Y1f$createReadStream, readdirSync as $a0Y1f$readdirSync, existsSync as $a0Y1f$existsSync} from "fs";
+import {createReadStream as $a0Y1f$createReadStream, existsSync as $a0Y1f$existsSync} from "fs";
 import {fromIni as $a0Y1f$fromIni} from "@aws-sdk/credential-providers";
-import {S3Client as $a0Y1f$S3Client} from "@aws-sdk/client-s3";
+import {GetObjectCommand as $a0Y1f$GetObjectCommand, S3Client as $a0Y1f$S3Client, CreateMultipartUploadCommand as $a0Y1f$CreateMultipartUploadCommand} from "@aws-sdk/client-s3";
 import {platform as $a0Y1f$platform} from "os";
 import {createInterface as $a0Y1f$createInterface} from "readline";
 import {spawn as $a0Y1f$spawn} from "child_process";
@@ -27,6 +27,52 @@ class $67e68b7691401ee6$var$Workflow {
         this.env = 'local';
     }
     /**
+     * List datasets in the workflow
+     * @param options
+     * @returns
+     */ list() {
+        return Array.from(this.datasets.values());
+    }
+    /**
+     * Removes dataset from the workflow
+     * @param source
+     * @param options
+     */ remove(dataset) {
+        this.datasets.delete(dataset.source);
+    }
+    /**
+     * Adds a dataset to workflow
+     * @param source
+     * @param options
+     * @returns
+     */ add(source, opt) {
+        return new Promise((resolve, reject)=>{
+            if (this.datasets.has(source)) reject(new Error(`Dataset ${opt.destination} already exists in the workflow`).message);
+            if (opt.destination === "") console.warn(`Dataset ${source} does not have a destination`);
+            if (opt.destination && opt.destination.startsWith("s3://")) {
+                const exists = this.#existsInS3(source);
+                if (exists) {
+                    const conn = this.#s3Connector({
+                        credentials: $67e68b7691401ee6$var$credentials("default"),
+                        region: "us-east-2"
+                    });
+                    const dataset = this.#newDataset(source, opt, conn);
+                    this.datasets.set(source, dataset);
+                    resolve(dataset);
+                }
+                // push new dataset to the workflow
+                reject(new Error(`Dataset ${source} does not exist in S3`));
+            }
+            if (source.startsWith("/") || source.startsWith("../") || source.startsWith("./")) {
+                if (!source.endsWith(".csv")) reject(new Error(`${source} is not a CSV file`));
+                const dataset = this.#newDataset(source, opt, this.#fsConnector(source));
+                this.datasets.set(source, dataset);
+                resolve(dataset);
+            }
+            reject(new Error(`Invalid source ${source} type`));
+        });
+    }
+    /**
      * Creates new dataset, a connector must be provided
      * @param source
      * @param options
@@ -39,61 +85,47 @@ class $67e68b7691401ee6$var$Workflow {
         };
     }
     /**
-     * List datasets in the workflow
-     * @param options
-     * @returns
-     */ list() {
-        return Array.from(this.datasets.values());
-    }
-    /**
-     * Adds a dataset to workflow
+     * Checks if a file exists in a S3 bucket
      * @param source
      * @param options
      * @returns
-     */ add(source1, opt) {
-        return new Promise((resolve, reject)=>{
-            if (this.datasets.has(source1)) reject(new Error(`Dataset ${opt.destination} already exists in the workflow`));
-            if (opt.destination === "") console.warn(`Dataset ${source1} does not have a destination`);
-            if (opt.destination && opt.destination.startsWith("s3://")) {
-                // const {data, err} = parseS3URI(opt.destination, {
-                //     file: false,
-                // });
-                //
-                // if (err) {
-                //     reject(err);
-                // }
-                const conn = this.s3Connector({
-                    credentials: $67e68b7691401ee6$var$credentials('default'),
-                    region: 'us-east-2'
-                });
-                const dataset = this.#newDataset(source1, opt, conn);
-                this.datasets.set(source1, dataset);
-                resolve(dataset.source);
-            }
-            if (source1.startsWith("/") || source1.startsWith("../") || source1.startsWith("./")) {
-                if (!source1.endsWith(".csv")) reject(new Error(`${source1} is not a CSV file`));
-                const conn = $a0Y1f$createReadStream(source1);
-                const dataset = this.#newDataset(source1, opt, conn);
-                this.datasets.set(source1, dataset);
-                resolve(dataset.source);
-            }
-            reject(new Error(`Invalid source ${source1} type`));
+     */  #existsInS3(source1) {
+        const { data: data , err: err1  } = this.#parseS3URI(source1, {
+            file: true
         });
+        if (err1 || !data.file) {
+            console.error(`Invalid S3 URI: ${source1}, URI must point to a file`);
+            return false;
+        }
+        const conn = this.#s3Connector({
+            credentials: $67e68b7691401ee6$var$credentials("default"),
+            region: "us-east-2"
+        });
+        const getObjectCommand = new $a0Y1f$GetObjectCommand({
+            Bucket: data.bucket,
+            Key: data.file
+        });
+        conn.send(getObjectCommand).then((res)=>{
+            if (res.$metadata.httpStatusCode === 200 && res.ContentType === "text/csv") return true;
+            return false;
+        }).catch((err2)=>{
+            console.error(err2);
+            return false;
+        });
+        return false;
     }
     /**
      * Connects to given path directory in the filesystem
      * @param path
      * @returns {fs.Dirent[]}
-     */ fsConnector(path) {
-        return $a0Y1f$readdirSync(path, {
-            withFileTypes: true
-        });
+     */  #fsConnector(path) {
+        return $a0Y1f$createReadStream(path);
     }
     /**
      * Creates a new S3 client
      * @param opt - S3 client config
      * @returns S3Client
-     */ s3Connector(opt) {
+     */  #s3Connector(opt) {
         if (!opt.region) opt.region = 'us-east-2';
         return new $a0Y1f$S3Client(opt);
     }
@@ -189,14 +221,14 @@ class $67e68b7691401ee6$var$Workflow {
                 shape.columns = first.row;
             }
             if (count > 0 && count < max) {
-                // if odd number of quotes on current line then there is a chance the record spans the next line
+                // there is a chance the record spans next line
                 const inlineQuotes = current.split(`"`).length - 1;
                 if (previous) {
                     if (inlineQuotes % 2 !== 0) // TODO: make sure previous + current
                     // console.log(previous + l);
                     shape.spanMultipleLines = true;
                 }
-                // check if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
+                // if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
                 if (inlineQuotes % 2 !== 0 && current.split(`""`).length - 1 !== 1) previous = current;
                 const width = current.split(first.del).length;
                 if (width !== first.row.length) {
@@ -208,6 +240,37 @@ class $67e68b7691401ee6$var$Workflow {
             count++;
         });
         return shape;
+    }
+    /**
+     * Initiates a multipart upload and returns an upload ID
+     * @returns {string} uploadID
+     * @private
+     */  #initMultipartUpload(d2, bucket, key) {
+        return new Promise((resolve, reject)=>{
+            try {
+                const conn = this.#s3Connector({
+                    credentials: $67e68b7691401ee6$var$credentials("default"),
+                    region: "us-east-2"
+                });
+                if (!(conn instanceof $a0Y1f$S3Client)) throw new Error(`Invalid operation for ${d2.source}`);
+                const command = new $a0Y1f$CreateMultipartUploadCommand({
+                    Bucket: bucket,
+                    ContentEncoding: "utf8",
+                    ContentType: "text/csv",
+                    Key: key
+                });
+                conn.send(command).then((data)=>{
+                    if (data.UploadId) resolve(data.UploadId);
+                    reject(new Error("noop"));
+                }).catch((error)=>{
+                    reject(error);
+                }).finally(()=>{
+                    console.log("init multipart upload");
+                });
+            } catch (err) {
+                reject(err);
+            }
+        });
     }
     /**
      * Parse (s3://) style uri
@@ -247,174 +310,7 @@ class $67e68b7691401ee6$var$Workflow {
 }
 function $67e68b7691401ee6$export$771cf478395a0d22(name) {
     return new $67e68b7691401ee6$var$Workflow(name);
-} // listFilesInS3(path: { bucket: string, key: string }) {
- //     try {
- //         const client = this.s3Connector({})
- //
- //         const command = new ListObjectsCommand({
- //             // eslint-disable-next-line no-mixed-spaces-and-tabs
- //             Bucket: bucket,
- //             Prefix: key,
- //         });
- //
- //         const response = client.send(command);
- //
- //         if (response.$metadata.httpStatusCode !== 200) {
- //             console.log(response.$metadata)
- //             return
- //         }
- //         return response.Contents
- //     } catch (err) {
- //         console.log(err)
- //     }
- // }
- // // get the first line (header column)
- // const rl = readline.createInterface({
- // 	input: d.options.connector,
- // 	crlfDelay: Infinity,
- // });
- // let count = 0;
- // // first 200 rows on open
- // let firstViewMax = 200;
- // rl.on("line", (line: any) => {
- // 	if (count === 0) {
- // 		d.options.columns = line.split(",");
- // 		count++;
- // 		return;
- // 	}
- // 	if (count > firstViewMax) {
- // 		rl.close();
- // 		return;
- // 	}
- // 	const row = line.split(",");
- // 	d.data.push(row);
- // 	count++;
- // }).on("close", () => {
- // 	rl.close();
- // });
- // }
- // this.datasets.set(d.source, d);
- // /**
- //  * Initiates a multipart upload and returns an upload ID
- //  * @returns {string} uploadID
- //  * @private
- //  */
- // initMultipartUpload(
- // 	d: Dataset,
- // 	bucket: string,
- // 	key: string
- // ): Promise<string> {
- // 	return new Promise((resolve, reject) => {
- // 		try {
- // 			const client = d.options.loader;
- // 			if (!(client instanceof S3Client))
- // 				throw new Error(`Invalid operation for ${d.source}`);
- // 			const command = new CreateMultipartUploadCommand({
- // 				Bucket: bucket,
- // 				ContentEncoding: "utf8",
- // 				ContentType: "text/csv",
- // 				Key: key,
- // 			});
- // 			client
- // 				.send(command)
- // 				.then((data) => {
- // 					if (data.UploadId) {
- // 						resolve(data.UploadId);
- // 					}
- // 					reject(new Error("Invalid upload ID"));
- // 				})
- // 				.catch((error) => {
- // 					reject(error);
- // 				})
- // 				.finally(() => {
- // 					console.log("initialized multipart upload");
- // 				});
- // 		} catch (err) {
- // 			reject(err);
- // 		}
- // 	});
- // }
- // /**
- //  * Saves the dataset to the storage (AWS S3 or Fs)
- //  * @param source
- //  * @param options
- //  * @private
- //  */
- // save(d: Dataset) {
- // 	return new Promise((resolve, reject) => {
- // 		try {
- // 			const size = fs.fstatSync(d.source).size;
- // 			if (size > 50000) {
- // 				console.log(
- // 					"file size is greater than threshold of 50MB, breaking into chunks"
- // 				);
- // 			}
- // 		} catch (err) {
- // 			reject(err);
- // 		}
- // 	});
- // }
- //
- // /**
- //  * Loads a CSV file into a dataset
- //  * @param path
- //  * @param options
- //  * @returns Promise<Dataset>
- //  */
- // CsvLoader(d: Dataset): Promise<Dataset> {
- //     return new Promise((resolve, reject) => {
- //         try {
- //             if (typeof d.source !== "string") {
- //                 reject(new Error("Not implemented"));
- //             }
- //
- //             if (
- //                 d.options.isRemote &&
- //                 d.source.startsWith("s3://") &&
- //                 d.source.split(":/")[0] === "s3"
- //             ) {
- //                 // remove the s3://
- //                 const src = d.source.split(":/")[1];
- //
- //                 const [bucket, ...keys] = src.split("/").splice(1);
- //
- //                 console.log(bucket);
- //                 console.log(keys.join("/"));
- //
- //                 // const command = new GetObjectCommand({
- //                 // 	Bucket: bucket,
- //                 // 	Key: key,
- //                 // 	Range: "bytes=0-1",
- //                 // });
- //
- //                 // const result = await s3.send(command);
- //
- //                 // if (result.$metadata.httpStatusCode !== 200) {
- //                 // 	reject(new Error("File could not be read"));
- //                 // }
- //
- //                 // if (result.ContentType !== "text/csv") {
- //                 // 	reject(new Error("File is not a CSV file"));
- //                 // }
- //
- //                 // if (result.ContentLength === 0) {
- //                 // 	reject(new Error("File is empty"));
- //                 // }
- //
- //                 // if (result.Body) {
- //                 // 	const columns = result.Body.toString();
- //
- //                 // 	console.log(columns);
- //
- //                 // 	resolve(d);
- //                 // }
- //             }
- //             resolve(d);
- //         } catch (err) {
- //             reject(err);
- //         }
- //     });
- // }
+}
 
 
 

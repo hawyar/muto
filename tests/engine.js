@@ -14,8 +14,9 @@ tap.test("init workflow", async (t) => {
         const d = await workflow.add(__dirname + "/fixtures/" + file, {
             delimiter: ",",
         })
-        console.log("added file " + d);
+        console.log("added file " + d.source);
     }
+    console.log("hey")
     t.end();
 });
 
