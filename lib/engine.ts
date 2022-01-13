@@ -5,7 +5,8 @@ import {spawn} from "child_process";
 import {fromIni} from "@aws-sdk/credential-providers"
 import * as fastq from "fastq";
 import type {queueAsPromised} from "fastq";
-
+import path from "path";
+import {readFileSync, writeFileSync} from 'atomically';
 import {
     S3Client,
     GetObjectCommand,
@@ -53,11 +54,11 @@ interface Options {
     delimiter: supportedDelimiters
 }
 
-
 type Args = {
     source: string,
     options: Options
 }
+
 
 const credentials = (profile: string) => fromIni({
     profile: profile,
@@ -65,7 +66,6 @@ const credentials = (profile: string) => fromIni({
         return mfaSerial
     },
 });
-
 
 class Dataset {
     source: string
@@ -81,6 +81,114 @@ class Dataset {
     }
 }
 
+interface Cache {
+    path: string
+    init: Date
+
+    get(key: string): Dataset
+
+    set(key: string, value: Dataset): void
+
+    has(key: string): boolean
+
+    delete(key: string): void
+
+    clear(): void
+
+    size(): number
+
+    keys(): string[]
+}
+
+
+const queue = (function () {
+    let q: queueAsPromised<Dataset>;
+
+// this func is private by scope
+    async function worker(arg: any) {
+        console.log(arg)
+    }
+
+    return {
+        getInstance: () => {
+            if (!q) {
+                q = fastq.promise(worker, 10)
+            }
+            return q;
+        }
+    }
+})();
+
+const cache = (function (): { getInstance: () => Cache } {
+    let cache: Cache;
+
+    function init() {
+        const cachePath = path.join(process.cwd(), '.muto-cache')
+
+        if (!fs.existsSync(cachePath)) {
+            writeFileSync(cachePath, JSON.stringify({}))
+        }
+
+        return {
+            init: new Date(),
+            path: cachePath,
+            get: (key: string): any => {
+                const file = readFileSync(cachePath)
+                const cache = JSON.parse(file.toString())
+
+                if (cache[key] !== key) {
+                    throw new Error('Cache key does not match')
+                }
+                return cache[key]
+            },
+            set: (key: string, value: Dataset): string => {
+                const file = readFileSync(cachePath)
+                const cache = JSON.parse(file.toString())
+
+                cache[key] = value
+                writeFileSync(cachePath, JSON.stringify(cache))
+                return key
+            },
+            has: (key: string): boolean => {
+                const file = readFileSync(cachePath)
+                const cache = JSON.parse(file.toString())
+                return cache[key] === key
+            },
+            delete: (key: string) => {
+                const file = readFileSync(path.join(process.cwd(), '.muto-cache'))
+                const cache = JSON.parse(file.toString())
+
+                delete cache[key]
+
+                writeFileSync(cachePath, JSON.stringify(cache))
+            },
+            clear: () => {
+                const file = readFileSync(path.join(process.cwd(), '.muto-cache'))
+
+                writeFileSync(cachePath, JSON.stringify({}))
+            },
+            size: () => {
+                const file = readFileSync(cachePath)
+                const cache = JSON.parse(file.toString())
+                return Object.keys(cache).length
+            },
+            keys: () => {
+                const file = readFileSync(cachePath)
+                const cache = JSON.parse(file.toString())
+                return Object.keys(cache)
+            }
+        }
+    }
+
+    return {
+        getInstance: () => {
+            if (!cache) {
+                cache = init()
+            }
+            return cache
+        }
+    }
+})()
 
 // Represents a workflow with a list of datasets in a local or cloud env
 class Workflow {
@@ -89,57 +197,64 @@ class Workflow {
     readonly createdAt: Date;
     env: env;
     queue: queueAsPromised<Args>
+    cache: Cache
 
     constructor(name: string) {
         this.name = name;
         this.datasets = new Map();
         this.createdAt = new Date();
         this.env = 'local';
-        this.queue = fastq.promise(this.#worker, 1)
+        this.queue = queue.getInstance();
+        this.cache = cache.getInstance()
     }
 
-    async #worker({source, options}: Args): Promise<Dataset> {
-        return new Promise((resolve, reject) => {
-            if (this.datasets.has(source)) {
-                reject(new Error(`Dataset ${options.destination} already exists in the workflow`).message);
-            }
-
-            if (options.destination === "") {
-                console.warn(`Dataset ${source} does not have a destination`);
-            }
-
-            if (options.destination && options.destination.startsWith("s3://")) {
-                const exists = this.#existsInS3(source);
-
-                if (exists) {
-                    const conn = this.#s3Connector({
-                        credentials: credentials("default"),
-                        region: "us-east-2",
-                    });
-                    const dataset = new Dataset({source, options}, conn);
-                    this.datasets.set(source, dataset);
-                    resolve(dataset);
-                }
-                reject(new Error(`Dataset ${source} does not exist in S3`));
-            }
-
-            if (
-                source.startsWith("/") ||
-                source.startsWith("../") ||
-                source.startsWith("./")
-            ) {
-                if (!source.endsWith(".csv")) {
-                    reject(new Error(`${source} is not a CSV file`));
-                }
-
-                const dataset = new Dataset({source, options}, this.#fsConnector(source));
-                this.datasets.set(source, dataset);
-                resolve(dataset);
-            }
-            reject(new Error(`Invalid source ${source} type`));
-        });
-
-    }
+    // async #worker({source, options}: Args): Promise<Dataset> {
+    //     return new Promise((resolve, reject) => {
+    //         if (this.datasets.has(source)) {
+    //             reject(new Error(`Dataset ${options.destination} already exists in the workflow`).message);
+    //         }
+    //
+    //         if (options.destination === "") {
+    //             console.warn(`Dataset ${source} does not have a destination`);
+    //         }
+    //
+    //         if (options.destination && options.destination.startsWith("s3://")) {
+    //             const exists = this.#existsInS3(source);
+    //
+    //             if (exists) {
+    //                 const conn = this.#s3Connector({
+    //                     credentials: credentials("default"),
+    //                     region: "us-east-2",
+    //                 });
+    //                 const dataset = new Dataset({source, options}, conn);
+    //                 this.datasets.set(source, dataset);
+    //                 resolve(dataset);
+    //             }
+    //             reject(new Error(`Dataset ${source} does not exist in S3`));
+    //         }
+    //
+    //         console.log("passed me")
+    //
+    //         if (
+    //             source.startsWith("/") ||
+    //             source.startsWith("../") ||
+    //             source.startsWith("./")
+    //         ) {
+    //             if (!source.endsWith(".csv")) {
+    //                 reject(new Error(`${source} is not a CSV file`));
+    //             }
+    //
+    //             const dataset = new Dataset({source, options}, this.#fsConnector(source));
+    //
+    //             this.queue.push({source, options})
+    //             console.log("added to queue, curr len: ", this.queue.length)
+    //             this.datasets.set(source, dataset);
+    //             resolve(dataset);
+    //         }
+    //         reject(new Error(`Invalid source ${source} type`));
+    //     });
+    //
+    // }
 
     /**
      * List datasets in the workflow
@@ -165,53 +280,57 @@ class Workflow {
      * @param options
      * @returns
      */
-    add(source: string, opt: Options): Promise<Dataset | Error> {
+    add(source: string, opt: Options) {
+        // add the dataset to the queue
         return new Promise((resolve, reject) => {
-
-            if (this.datasets.has(source)) {
-                reject(new Error(`Dataset ${opt.destination} already exists in the workflow`).message);
-            }
-
-            if (opt.destination === "") {
-                console.warn(`Dataset ${source} does not have a destination`);
-            }
-
-            if (opt.destination && opt.destination.startsWith("s3://")) {
-                const exists = this.#existsInS3(source);
-
-                if (exists) {
-                    const conn = this.#s3Connector({
-                        credentials: credentials("default"),
-                        region: "us-east-2",
-                    });
-                    const dataset = new Dataset({source, options: opt}, conn);
-
-                    this.datasets.set(source, dataset);
-                    resolve(dataset);
-                }
-                // push new dataset to the workflow
-                reject(new Error(`Dataset ${source} does not exist in S3`));
-            }
-
-            if (
-                source.startsWith("/") ||
-                source.startsWith("../") ||
-                source.startsWith("./")
-            ) {
-                if (!source.endsWith(".csv")) {
-                    reject(new Error(`${source} is not a CSV file`));
-                }
-
-                const dataset = new Dataset({source, options: opt}, this.#fsConnector(source));
-                this.datasets.set(source, dataset);
-                resolve(dataset);
-            }
-            reject(new Error(`Invalid source ${source} type`));
-        });
+            this.queue.push({source, options: opt})
+            console.log("added to queue, curr len: ", this.queue.length())
+        })
+        // return new Promise((resolve, reject) => {
+        //     if (this.datasets.has(source)) {
+        //         reject(new Error(`Dataset ${opt.destination} already exists in the workflow`).message);
+        //     }
+        //
+        //     if (opt.destination === "") {
+        //         console.warn(`Dataset ${source} does not have a destination`);
+        //     }
+        //
+        //     if (opt.destination && opt.destination.startsWith("s3://")) {
+        //         const exists = this.#existsInS3(source);
+        //
+        //         if (exists) {
+        //             const conn = this.#s3Connector({
+        //                 credentials: credentials("default"),
+        //                 region: "us-east-2",
+        //             });
+        //             const dataset = new Dataset({source, options: opt}, conn);
+        //
+        //             this.datasets.set(source, dataset);
+        //             resolve(dataset);
+        //         }
+        //         // push new dataset to the workflow
+        //         reject(new Error(`Dataset ${source} does not exist in S3`));
+        //     }
+        //
+        //     if (
+        //         source.startsWith("/") ||
+        //         source.startsWith("../") ||
+        //         source.startsWith("./")
+        //     ) {
+        //         if (!source.endsWith(".csv")) {
+        //             reject(new Error(`${source} is not a CSV file`));
+        //         }
+        //
+        //         const dataset = new Dataset({source, options: opt}, this.#fsConnector(source));
+        //         this.datasets.set(source, dataset);
+        //         resolve(dataset);
+        //     }
+        //     reject(new Error(`Invalid source ${source} type`));
+        // });
     }
 
     /**
-     * Checks if a file exists in a S3 bucket
+     * Checks if file exists in a S3 bucket
      * @param source
      * @param options
      * @returns
@@ -271,8 +390,7 @@ class Workflow {
     }
 
     /**
-     * Detects the shape of a CSV file to know as much as possible early on
-     * regardless of the given options.
+     * Detects the shape of a CSV file to know as much as possible early on regardless of given options.
      * @param  {string} path - Path to the file
      * @returns S3Client
      */
@@ -402,31 +520,31 @@ class Workflow {
         return shape;
     }
 
-    //
-    // checkFileSize(d: Dataset): Promise<Dataset> {
-    //     const max = 1024 * 1024 * 20;
-    //     return new Promise((resolve, reject) => {
-    //         const size = fs.statSync(d.source).size;
-    //         if (size > max) {
-    //             d.errors["fileSize"] = `${d.source} is too large`;
-    //             reject(d);
-    //         } else {
-    //             resolve(d);
-    //         }
-    //     });
-    // }
-
-    /**
-     * Initiates a multipart upload and returns an upload ID
-     * @returns {string} uploadID
-     * @private
-     */
-    #uploadToS3(d: Dataset) {
-        // grab the connector of the dataset
-        const c = d.connector;
+    // check fileSize sync
+    checkFileSize(path: string): number {
+        const max = 1024 * 1024 * 50
+        if (!fs.existsSync(path)) {
+            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
+        }
+        const file = fs.statSync(path)
 
 
+        file.blocks = Math.ceil(file.size / 512)
+
+        return fs.statSync(path).size
     }
+
+    // /**
+    //  * Initiates a multipart upload and returns an upload ID
+    //  * @returns {string} uploadID
+    //  * @private
+    //  */
+    // #uploadToS3(d: Dataset) {
+    //     // grab the connector of the dataset
+    //     const c = d.connector;
+    //
+    //
+    // }
 
     /**
      * Initiates a multipart upload and returns an upload ID
@@ -543,7 +661,6 @@ class Workflow {
  * @param {string} name - Name of the workflow
  * @returns {Workflow} - New workflow
  */
-
 export function createWorkflow(name: string): Workflow {
     return new Workflow(name);
 }

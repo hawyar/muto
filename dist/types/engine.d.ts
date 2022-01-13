@@ -48,6 +48,17 @@ declare class Dataset {
     connector: connectorType;
     constructor(args: Args, connector: connectorType);
 }
+interface Cache {
+    path: string;
+    init: Date;
+    get(key: string): Dataset;
+    set(key: string, value: Dataset): void;
+    has(key: string): boolean;
+    delete(key: string): void;
+    clear(): void;
+    size(): number;
+    keys(): string[];
+}
 declare class Workflow {
     #private;
     name: string;
@@ -55,6 +66,7 @@ declare class Workflow {
     readonly createdAt: Date;
     env: env;
     queue: queueAsPromised<Args>;
+    cache: Cache;
     constructor(name: string);
     /**
      * List datasets in the workflow
@@ -63,18 +75,19 @@ declare class Workflow {
      */
     list(): Dataset[];
     /**
-     * Removes dataset from the workflow
+     * Removes dataset from workflow
      * @param source
      * @param options
      */
     remove(dataset: Dataset): void;
     /**
-     * Adds a dataset to workflow
+     * Add dataset to workflow
      * @param source
      * @param options
      * @returns
      */
-    add(source: string, opt: Options): Promise<Dataset | Error>;
+    add(source: string, opt: Options): Promise<unknown>;
+    checkFileSize(path: string): number;
 }
 /**
  * Returns a new workflow
