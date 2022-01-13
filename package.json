@@ -1,32 +1,27 @@
 {
   "name": "muto",
   "version": "1.0.0",
-  "source": "lib/index.ts",
   "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/types.d.ts",
+  "type": "module",
   "bin": {
-    "muto": "/bin/index.js"
+    "muto": "/bin/cli.js"
   },
   "scripts": {
-    "watch": "parcel watch",
-    "build": "parcel build",
-    "test:coverage": "tap --coverage-report=lcov",
-    "docs": "jsdoc ./dist/lib/engine.js -d docs -r -e utf8 --readme README.md -c conf.json",
-    "test": "tap --no-coverage --reporter=specy -J"
+    "build": "node bin/build.js && tsc",
+    "test": "tap --no-coverage --reporter=specy -J",
+    "docs": "jsdoc ./dist/lib/engine.js -d docs -r -e utf8 --readme README.md -c conf.json"
   },
-  "keywords": [],
   "author": "hawyar",
   "devDependencies": {
-    "@parcel/packager-ts": "^2.1.1",
-    "@parcel/transformer-typescript-types": "^2.1.1",
+    "@tsconfig/recommended": "^1.0.1",
     "@typescript-eslint/eslint-plugin": "^5.9.1",
     "@typescript-eslint/parser": "^5.9.1",
+    "esbuild": "^0.14.11",
+    "esbuild-node-externals": "^1.4.1",
     "eslint": "^7.32.0",
     "finalhandler": "^1.1.2",
     "husky": "^7.0.0",
     "jsdoc": "^3.6.7",
-    "parcel": "^2.1.1",
     "serve-static": "^1.14.2",
     "tap": "^15.1.5",
     "typescript": "^4.5.4"
@@ -37,6 +32,7 @@
     "@aws-sdk/client-s3": "^3.46.0",
     "@aws-sdk/credential-providers": "^3.46.0",
     "arg": "^5.0.1",
-    "dotenv": "^10.0.0"
+    "dotenv": "^10.0.0",
+    "readdirp": "^3.6.0"
   }
 }

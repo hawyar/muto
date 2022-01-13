@@ -343,6 +343,31 @@ class Workflow {
         return shape;
     }
 
+    //
+    // checkFileSize(d: Dataset): Promise<Dataset> {
+    //     const max = 1024 * 1024 * 20;
+    //     return new Promise((resolve, reject) => {
+    //         const size = fs.statSync(d.source).size;
+    //         if (size > max) {
+    //             d.errors["fileSize"] = `${d.source} is too large`;
+    //             reject(d);
+    //         } else {
+    //             resolve(d);
+    //         }
+    //     });
+    // }
+
+    /**
+     * Initiates a multipart upload and returns an upload ID
+     * @returns {string} uploadID
+     * @private
+     */
+    #uploadToS3(d: Dataset) {
+        // grab the connector of the dataset
+        const c = d.connector;
+
+
+    }
 
     /**
      * Initiates a multipart upload and returns an upload ID

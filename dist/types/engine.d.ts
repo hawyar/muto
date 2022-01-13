@@ -1,8 +1,9 @@
+/// <reference types="node" />
 import * as fs from "fs";
 import { S3Client } from "@aws-sdk/client-s3";
-type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_" | "|";
-type env = 'local' | 'aws';
-type connectorType = S3Client | fs.ReadStream;
+declare type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_" | "|";
+declare type env = 'local' | 'aws';
+declare type connectorType = S3Client | fs.ReadStream;
 interface Shape {
     type: string;
     columns: Array<string>;
@@ -67,6 +68,5 @@ declare class Workflow {
  * @param {string} name - Name of the workflow
  * @returns {Workflow} - New workflow
  */
-export function createWorkflow(name: string): Workflow;
-
-//# sourceMappingURL=types.d.ts.map
+export declare function createWorkflow(name: string): Workflow;
+export {};

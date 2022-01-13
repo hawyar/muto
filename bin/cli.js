@@ -8,14 +8,14 @@ const path = require("path");
 const usage = `
 Usage:
   ${pkg.name} [options]
-
+  
   commands:
   	upload	uploads the specified directory to S3
-  	start		starts a etl workflow
-
 
   options:
     -h, --help      output usage information \n -v, --version   output the version number
+    -v, --version  output the version number
+    
 `;
 
 const args = arg({
@@ -37,7 +37,7 @@ if (args["--help"]) {
 }
 
 if (args["--version"]) {
-    stdWrite(`v${pkg.version} \n`);
+    stdWrite(`muto - v${pkg.version}`);
     process.exit(0);
 }
 
