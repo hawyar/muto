@@ -11,7 +11,7 @@ import {nodeExternalsPlugin} from 'esbuild-node-externals'
             target: 'es6',
             platform: 'node',
             format: 'esm',
-            outfile: path.join(process.cwd(), "dist/muto.ts"),
+            outfile: path.join(process.cwd(), "dist/muto.js"),
             plugins: [nodeExternalsPlugin()],
         }
     ).catch(() => process.exit(1));

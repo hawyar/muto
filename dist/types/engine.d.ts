@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import * as fs from "fs";
+import type { queueAsPromised } from "fastq";
 import { S3Client } from "@aws-sdk/client-s3";
 declare type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_" | "|";
 declare type env = 'local' | 'aws';
@@ -36,12 +37,24 @@ interface Options {
     bom: boolean;
     delimiter: supportedDelimiters;
 }
+declare type Args = {
+    source: string;
+    options: Options;
+};
+declare class Dataset {
+    source: string;
+    options: Options;
+    createdAt: Date;
+    connector: connectorType;
+    constructor(args: Args, connector: connectorType);
+}
 declare class Workflow {
     #private;
     name: string;
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
+    queue: queueAsPromised<Args>;
     constructor(name: string);
     /**
      * List datasets in the workflow

@@ -3,6 +3,9 @@ import * as os from "os";
 import {createInterface} from "readline"
 import {spawn} from "child_process";
 import {fromIni} from "@aws-sdk/credential-providers"
+import * as fastq from "fastq";
+import type {queueAsPromised} from "fastq";
+
 import {
     S3Client,
     GetObjectCommand,
@@ -51,6 +54,11 @@ interface Options {
 }
 
 
+type Args = {
+    source: string,
+    options: Options
+}
+
 const credentials = (profile: string) => fromIni({
     profile: profile,
     mfaCodeProvider: async (mfaSerial) => {
@@ -59,18 +67,78 @@ const credentials = (profile: string) => fromIni({
 });
 
 
+class Dataset {
+    source: string
+    options: Options
+    createdAt: Date
+    connector: connectorType
+
+    constructor(args: Args, connector: connectorType) {
+        this.source = args.source;
+        this.options = args.options;
+        this.createdAt = new Date();
+        this.connector = connector;
+    }
+}
+
+
 // Represents a workflow with a list of datasets in a local or cloud env
 class Workflow {
     name: string;
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
+    queue: queueAsPromised<Args>
 
     constructor(name: string) {
         this.name = name;
         this.datasets = new Map();
         this.createdAt = new Date();
         this.env = 'local';
+        this.queue = fastq.promise(this.#worker, 1)
+    }
+
+    async #worker({source, options}: Args): Promise<Dataset> {
+        return new Promise((resolve, reject) => {
+            if (this.datasets.has(source)) {
+                reject(new Error(`Dataset ${options.destination} already exists in the workflow`).message);
+            }
+
+            if (options.destination === "") {
+                console.warn(`Dataset ${source} does not have a destination`);
+            }
+
+            if (options.destination && options.destination.startsWith("s3://")) {
+                const exists = this.#existsInS3(source);
+
+                if (exists) {
+                    const conn = this.#s3Connector({
+                        credentials: credentials("default"),
+                        region: "us-east-2",
+                    });
+                    const dataset = new Dataset({source, options}, conn);
+                    this.datasets.set(source, dataset);
+                    resolve(dataset);
+                }
+                reject(new Error(`Dataset ${source} does not exist in S3`));
+            }
+
+            if (
+                source.startsWith("/") ||
+                source.startsWith("../") ||
+                source.startsWith("./")
+            ) {
+                if (!source.endsWith(".csv")) {
+                    reject(new Error(`${source} is not a CSV file`));
+                }
+
+                const dataset = new Dataset({source, options}, this.#fsConnector(source));
+                this.datasets.set(source, dataset);
+                resolve(dataset);
+            }
+            reject(new Error(`Invalid source ${source} type`));
+        });
+
     }
 
     /**
@@ -83,7 +151,7 @@ class Workflow {
     }
 
     /**
-     * Removes dataset from the workflow
+     * Removes dataset from workflow
      * @param source
      * @param options
      */
@@ -92,7 +160,7 @@ class Workflow {
     }
 
     /**
-     * Adds a dataset to workflow
+     * Add dataset to workflow
      * @param source
      * @param options
      * @returns
@@ -116,7 +184,8 @@ class Workflow {
                         credentials: credentials("default"),
                         region: "us-east-2",
                     });
-                    const dataset = this.#newDataset(source, opt, conn);
+                    const dataset = new Dataset({source, options: opt}, conn);
+
                     this.datasets.set(source, dataset);
                     resolve(dataset);
                 }
@@ -133,26 +202,12 @@ class Workflow {
                     reject(new Error(`${source} is not a CSV file`));
                 }
 
-                const dataset = this.#newDataset(source, opt, this.#fsConnector(source));
+                const dataset = new Dataset({source, options: opt}, this.#fsConnector(source));
                 this.datasets.set(source, dataset);
                 resolve(dataset);
             }
             reject(new Error(`Invalid source ${source} type`));
         });
-    }
-
-    /**
-     * Creates new dataset, a connector must be provided
-     * @param source
-     * @param options
-     */
-    #newDataset(source: string, options: Options, connector: connectorType): Dataset {
-        return {
-            source,
-            options,
-            createdAt: new Date(),
-            connector,
-        }
     }
 
     /**
@@ -170,7 +225,6 @@ class Workflow {
             console.error(`Invalid S3 URI: ${source}, URI must point to a file`);
             return false;
         }
-
 
         const conn = this.#s3Connector({
             credentials: credentials("default"),
@@ -196,7 +250,7 @@ class Workflow {
     }
 
     /**
-     * Connects to given path directory in the filesystem
+     * Returns a readable stream for a local file
      * @param path
      * @returns {fs.Dirent[]}
      */
@@ -205,7 +259,7 @@ class Workflow {
     }
 
     /**
-     * Creates a new S3 client
+     * Returns a S3 client
      * @param opt - S3 client config
      * @returns S3Client
      */
@@ -216,8 +270,13 @@ class Workflow {
         return new S3Client(opt);
     }
 
-    // Early on we check the csv file for some attributes to determine the shape of the data
-    #detectShape(d: Dataset): Shape {
+    /**
+     * Detects the shape of a CSV file to know as much as possible early on
+     * regardless of the given options.
+     * @param  {string} path - Path to the file
+     * @returns S3Client
+     */
+    #detectShape(path: string): Shape {
         const shape: Shape = {
             type: '',
             columns: [''],
@@ -232,8 +291,8 @@ class Workflow {
             preview: [['']],
         };
 
-        if (!fs.existsSync(d.source)) {
-            throw new Error(`${d.source} does not exist, provide a valid path to a CSV file`)
+        if (!fs.existsSync(path)) {
+            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
         }
 
         if (os.platform() === "win32") {
@@ -241,7 +300,7 @@ class Workflow {
             return shape;
         }
 
-        const mime = spawn("file", [d.source, "--mime-type"])
+        const mime = spawn("file", [path, "--mime-type"])
 
         mime.stdout.on("data", (data) => {
             const type = data.toString().split(":")[1].trim();
@@ -249,7 +308,7 @@ class Workflow {
             if (type === "text/csv" || type === "text/plain") {
                 shape.type = type;
             } else {
-                shape.errors["incorrectType"] = `${d.source} is not a CSV file`;
+                shape.errors["incorrectType"] = `${path} is not a CSV file`;
             }
         });
 
@@ -260,7 +319,7 @@ class Workflow {
         });
 
         const readLine = createInterface({
-            input: fs.createReadStream(d.source),
+            input: fs.createReadStream(path),
             crlfDelay: Infinity,
         });
 
@@ -290,7 +349,7 @@ class Workflow {
                 });
 
                 if (first.del === "" || first.row.length <= 1) {
-                    shape.errors["unrecognizedDelimiter"] = `${d.source} does not have a recognized delimiter`;
+                    shape.errors["unrecognizedDelimiter"] = `${path} does not have a recognized delimiter`;
                     shape.header = false;
                 }
 
