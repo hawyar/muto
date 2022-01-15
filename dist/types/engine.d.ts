@@ -1,10 +1,10 @@
 /// <reference types="node" />
 import * as fs from "fs";
-import type { queueAsPromised } from "fastq";
 import { S3Client } from "@aws-sdk/client-s3";
-declare type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_" | "|";
-declare type env = 'local' | 'aws';
+declare type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_";
+declare type env = 'local' | 'remote';
 declare type connectorType = S3Client | fs.ReadStream;
+declare type datasetStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready';
 interface Shape {
     type: string;
     columns: Array<string>;
@@ -28,12 +28,14 @@ interface Dataset {
     shape?: Shape;
     data?: string[][];
     createdAt: Date;
+    state: datasetStateType;
     connector: connectorType;
 }
 interface Options {
     destination: string;
     columns: Array<string>;
     header: boolean;
+    transform: (row: object) => object;
     bom: boolean;
     delimiter: supportedDelimiters;
 }
@@ -45,13 +47,13 @@ declare class Dataset {
     source: string;
     options: Options;
     createdAt: Date;
-    connector: connectorType;
-    constructor(args: Args, connector: connectorType);
+    state: datasetStateType;
+    constructor({ source, options }: Args);
 }
 interface Cache {
     path: string;
     init: Date;
-    get(key: string): Dataset;
+    get(key: string): Dataset | undefined;
     set(key: string, value: Dataset): void;
     has(key: string): boolean;
     delete(key: string): void;
@@ -65,29 +67,11 @@ declare class Workflow {
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
-    queue: queueAsPromised<Args>;
-    cache: Cache;
+    lcache: Cache;
     constructor(name: string);
-    /**
-     * List datasets in the workflow
-     * @param options
-     * @returns
-     */
     list(): Dataset[];
-    /**
-     * Removes dataset from workflow
-     * @param source
-     * @param options
-     */
     remove(dataset: Dataset): void;
-    /**
-     * Add dataset to workflow
-     * @param source
-     * @param options
-     * @returns
-     */
-    add(source: string, opt: Options): Promise<unknown>;
-    checkFileSize(path: string): number;
+    add(source: string, options: Options): Promise<string>;
 }
 /**
  * Returns a new workflow
