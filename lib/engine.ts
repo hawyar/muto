@@ -1,30 +1,34 @@
 import * as fs from "fs";
-import * as os from "os";
-import {createInterface} from "readline"
-import {spawn} from "child_process";
-import {fromIni} from "@aws-sdk/credential-providers"
-import * as fastq from "fastq";
-// import type {queueAsPromised} from "fastq";
+import {createInterface, Interface} from "readline";
 import path from "path";
 import {readFileSync, writeFileSync} from 'atomically';
-import {
-    S3Client,
-    GetObjectCommand,
-    S3ClientConfig,
-    CreateMultipartUploadCommand
-} from "@aws-sdk/client-s3";
+import {CreateMultipartUploadCommand, GetObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3";
+import {fromIni} from "@aws-sdk/credential-providers";
+import {ChildProcessWithoutNullStreams, spawn} from "child_process";
+import os from "os";
 
-// type ShapeErrType = 'unrecognizedDelimiter' | 'noHeader' | 'invalidFileType' | 'rowWidthMismatch'
+enum Delimiters {
+    COMMA = ",",
+    SEMICOLON = ";",
+    PIPE = "|",
+    COLON = ":",
+    TAB = "\t",
+    SPACE = " ",
+    TILDE = "~",
+    DASH = "-",
+    UNDERSCORE = "_"
+}
 
-type supportedDelimiters = "," | ";" | "|" | ":" | "\t" | " " | "^" | "~" | "*" | "!" | "-" | "_"
+
 type env = 'local' | 'remote'
 type connectorType = S3Client | fs.ReadStream
 
 
-// TODO: better error message for errors happening in transform
+// TODO: better error message for errors in transform
 type datasetStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
+type ShapeErrType = 'unrecognizedDelimiter' | 'noHeader' | 'invalidFileType' | 'rowWidthMismatch'
 
-// Shape of a dataset object
+
 interface Shape {
     type: string,
     columns: Array<string>,
@@ -39,53 +43,24 @@ interface Shape {
     preview: string[][],
 }
 
-
-// Dataset represents a file from a supported a data source
 interface Dataset {
     source: string
-    options: Options;
-    shape?: Shape
-    data?: string[][];
+    cached: boolean
+    options: DatasetOptions;
+    destination: string
+    shape: Shape
     createdAt: Date;
     state: datasetStateType
     connector: connectorType;
 }
 
-// Options for a dataset
-interface Options {
+interface DatasetOptions {
     destination: string;
     columns: Array<string>,
     header: boolean,
+    quotes: boolean,
     transform: (row: object) => object
-    bom: boolean,
-    delimiter: supportedDelimiters
-}
-
-type Args = {
-    source: string,
-    options: Options
-}
-
-
-const credentials = (profile: string) => fromIni({
-    profile: profile,
-    mfaCodeProvider: async (mfaSerial) => {
-        return mfaSerial
-    },
-});
-
-class Dataset {
-    source: string
-    options: Options
-    createdAt: Date
-    state: datasetStateType
-
-    constructor({source, options}: Args) {
-        this.source = source;
-        this.options = options;
-        this.createdAt = new Date();
-        this.state = 'init'
-    }
+    delimiter: Delimiters
 }
 
 interface Cache {
@@ -107,22 +82,235 @@ interface Cache {
     keys(): string[]
 }
 
-const queue = (function () {
-    let q: fastq.queueAsPromised<Args, void>;
+type ProcessResult = {
+    stdout: string,
+    stderr: string,
+    code: number
+}
 
-    async function worker(arg: Args) {
-        console.log(arg)
-    }
 
-    return {
-        getInstance: () => {
-            if (!q) {
-                q = fastq.promise(worker, 10)
-            }
-            return q;
+const credentials = (profile: string) => fromIni({
+    profile: profile,
+    mfaCodeProvider: async (mfaSerial) => {
+        return mfaSerial
+    },
+});
+
+
+const mlrCmd = path.join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
+
+
+class Dataset {
+    source: string
+    destination: string
+    _rowsCount: number
+    options: DatasetOptions
+    createdAt: Date
+    shape: Shape
+    state: datasetStateType
+    processCount: number
+    cached: boolean
+
+    constructor(source: string, options: DatasetOptions) {
+        this.source = source;
+        this.cached = false;
+        this._rowsCount = 0;
+        this.destination = options.destination || process.cwd()
+        this.options = options;
+        this.shape = {
+            type: '',
+            columns: [],
+            header: false,
+            encoding: '',
+            bom: false,
+            spanMultipleLines: false,
+            quotes: false,
+            delimiter: '',
+            errors: {},
+            warnings: {},
+            preview: []
         }
+        this.createdAt = new Date();
+        this.state = 'init'
+        this.processCount = 0
     }
-})();
+
+    async toJson(): Promise<string> {
+        const write = fs.createWriteStream(this.destination)
+
+        const json = this.#exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source])
+
+        json.stdout.pipe(write)
+
+        return new Promise((resolve, reject) => {
+            write.on('close', () => {
+                resolve(this.source)
+            })
+            write.on('error', (err) => {
+                reject(err)
+            })
+        })
+    }
+
+    async rowsCount(): Promise<number> {
+        const res = await this.#exec(mlrCmd, [`--ojson`, `count`, this.source])
+
+        const rowCountExec = await this.#promisifyProcessResult(res)
+
+        if (rowCountExec.code !== 0) {
+            throw new Error(`Error while counting rows: ${rowCountExec.stderr}`)
+        }
+
+        if (rowCountExec.stderr) {
+            throw new Error(rowCountExec.stderr)
+        }
+
+        const r = JSON.parse(rowCountExec.stdout)
+
+        if (r.length === 0) {
+            throw new Error('No rows found')
+        }
+        this._rowsCount = r[0].count
+        return r[0].count
+    }
+
+    async columns(): Promise<string[] | null> {
+        const res = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
+
+        const colExec = await this.#promisifyProcessResult(res)
+
+        if (colExec.code !== 0) {
+            return null
+        }
+
+        if (colExec.stderr) {
+            throw new Error(colExec.stderr)
+        }
+        const columns = JSON.parse(colExec.stdout)
+
+
+        if (columns.length === 0) {
+            this.shape.header = false
+            return null
+        }
+
+        this.shape.columns = Object.keys(columns[0])
+        this.shape.header = true
+
+        return this.shape.columns
+    }
+
+    async preview(count: number, streamTo?: string): Promise<string[][] | string> {
+
+        let write: fs.WriteStream
+
+        const maxPreview = 1024 * 1024 * 10
+
+        const fsp = fs.promises
+        const stat = await fsp.stat(this.source)
+
+        if (streamTo && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream || stat.size > maxPreview) {
+            try {
+                if (streamTo === undefined) throw new Error('stream-destination-undefined')
+                write = fs.createWriteStream(streamTo)
+            } catch (err) {
+                throw new Error(`${streamTo} is not writable`)
+            }
+
+            const previewExec = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+            previewExec.stdout.pipe(write)
+
+            console.warn(`👀 Preview saved to: ${streamTo}`)
+            return streamTo
+        }
+
+        const previewExec = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+
+        const prev = await this.#promisifyProcessResult(previewExec)
+
+        if (prev.stderr) {
+            throw new Error(prev.stderr)
+        }
+
+        if (prev.code !== 0) {
+            throw new Error(`Error while executing mlr command`)
+        }
+
+        const parsed = JSON.parse(prev.stdout)
+        this.shape.preview = parsed
+
+        return this.shape.preview
+    }
+
+    #promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult> {
+        const result: ProcessResult = {
+            stdout: '',
+            stderr: '',
+            code: 0
+        }
+
+        return new Promise((resolve, reject) => {
+            child.stdout.on('data', (data) => {
+                result.stdout += data
+            })
+
+            child.stderr.on('data', (data) => {
+                result.stderr += data
+            })
+
+            child.on('close', (code) => {
+                result.code = code === 0 ? 0 : 1
+                resolve(result)
+            })
+
+            child.on('error', (err) => {
+                reject(err)
+            })
+        })
+    }
+
+
+    #exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams {
+        this.processCount++
+        return spawn(cmd, args)
+    }
+
+    async #fileType(): Promise<void> {
+        const path = this.source;
+
+        if (!fs.existsSync(path)) {
+            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
+        }
+
+        if (os.platform() === "win32") {
+            // TODO: handle
+            return;
+        }
+
+        const mime = this.#exec("file", [path, "--mime-type"])
+
+        mime.stdout.on("data", (data) => {
+            const type = data.toString().split(":")[1].trim();
+
+            if (type === "text/csv" || type === "text/plain") {
+                this.shape.type = type;
+            } else {
+                this.shape.errors["incorrectType"] = `${path} is not a CSV file`;
+            }
+        });
+
+        mime.stderr.on("error", (err) => {
+            console.warn(err);
+        });
+
+        mime.on("close", (code) => {
+            if (code !== 0 || this.shape.type === "") {
+                console.warn("unable to use file() cmd");
+            }
+        });
+    }
+}
+
 
 const cache = (function (): { getInstance: () => Cache } {
     let cache: Cache;
@@ -131,7 +319,10 @@ const cache = (function (): { getInstance: () => Cache } {
         const cachePath = path.join(process.cwd(), '.muto-cache')
 
         if (!fs.existsSync(cachePath)) {
+            console.log('creating cache file at', cachePath)
             writeFileSync(cachePath, JSON.stringify({}))
+        } else {
+            console.log('loading cache from', cachePath)
         }
 
         return {
@@ -146,9 +337,13 @@ const cache = (function (): { getInstance: () => Cache } {
                 }
                 return cache[key]
             },
-            set: (key: string, value: Dataset): string => {
+            set: (key: string, value: Dataset): string | void => {
                 const file = readFileSync(cachePath)
                 const cache = JSON.parse(file.toString())
+
+                if (cache[key]) {
+                    return
+                }
 
                 cache[key] = value
                 writeFileSync(cachePath, JSON.stringify(cache))
@@ -157,7 +352,11 @@ const cache = (function (): { getInstance: () => Cache } {
             has: (key: string): boolean => {
                 const file = readFileSync(cachePath)
                 const cache = JSON.parse(file.toString())
-                return cache[key].source === key
+
+                if (cache[key]) {
+                    return true
+                }
+                return false
             },
             delete: (key: string) => {
                 const file = readFileSync(cachePath)
@@ -225,6 +424,22 @@ function fsConnector(filePath: string) {
                 });
             });
         },
+        readline(): Promise<Interface> {
+            return new Promise((resolve, reject) => {
+                const stream = fs.createReadStream(filePath);
+                stream.on('error', (err) => {
+                    reject(err);
+                });
+                stream.on('open', () => {
+                    const rl = createInterface({
+                        input: stream,
+                        crlfDelay: Infinity
+                    });
+                    resolve(rl);
+                });
+            });
+        },
+
     })
 }
 
@@ -234,7 +449,6 @@ class Workflow {
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
-    // queue: queueAsPromised<Args>
     lcache: Cache
 
     constructor(name: string) {
@@ -242,11 +456,8 @@ class Workflow {
         this.datasets = new Map();
         this.createdAt = new Date();
         this.env = 'local';
-        // this.queue = queue.getInstance();
         this.lcache = cache.getInstance()
     }
-
-    // async #worker({source, options}: Args): Promise<Dataset> {}
 
     list(): Dataset[] {
         return Array.from(this.datasets.values());
@@ -256,44 +467,25 @@ class Workflow {
         this.datasets.delete(dataset.source);
     }
 
-    add(source: string, options: Options): Promise<string> {
-        return new Promise((resolve, reject) => {
-            if (options.destination === "") {
-                console.warn(`dataset-source-not-provided: Dataset ${source} does not have a destination`);
-            }
+    async add(source: string, options: DatasetOptions): Promise<string> {
+        if (options.destination === "") {
+            console.warn(`destination-not-provided: provide a destination for ${source}`);
+        }
 
-            if (this.lcache.has(source)) {
-                console.log("cache hit")
-                const dataset = this.lcache.get(source)
-                resolve(source)
-            }
+        if (this.lcache.has(source)) {
+            return source
+        }
 
-            const type = this.#determineSource(source);
+        const dataset = new Dataset(source, options);
 
-            if (type === 'local') {
-                const fsConn = fsConnector(source)
-                const dataset = new Dataset({source, options});
+        const defaultPreviewCount = 10
 
-                this.lcache.set(source, dataset);
-                resolve(source);
-            }
+        await Promise.all([dataset.columns(), dataset.preview(defaultPreviewCount), dataset.toJson()]);
 
-            // if (type === "remote") {
-            //     const exists = this.#existsInS3(source);
-            //
-            //     if (exists) {
-            //
-            //         const conn = s3Connector({
-            //             credentials: credentials("default"),
-            //             region: "us-east-2",
-            //         });
-            //         const dataset = new Dataset({source, options}, conn);
-            //
-            //         this.datasets.set(source, dataset);
-            //         resolve(source);
-            //     }
-            // }
-        });
+        console.log(dataset);
+        this.datasets.set(source, dataset);
+        this.lcache.set(source, dataset)
+        return source
     }
 
     /**
@@ -367,130 +559,6 @@ class Workflow {
         return new S3Client(opt);
     }
 
-    #detectShape(path: string): Shape {
-        const shape: Shape = {
-            type: '',
-            columns: [''],
-            header: false,
-            encoding: 'utf-8',
-            bom: false,
-            spanMultipleLines: false,
-            quotes: false,
-            delimiter: ',',
-            errors: {},
-            warnings: {},
-            preview: [['']],
-        };
-
-        if (!fs.existsSync(path)) {
-            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
-        }
-
-        if (os.platform() === "win32") {
-            console.error(`handle windows later`)
-            return shape;
-        }
-
-        const mime = spawn("file", [path, "--mime-type"])
-
-        mime.stdout.on("data", (data) => {
-            const type = data.toString().split(":")[1].trim();
-
-            if (type === "text/csv" || type === "text/plain") {
-                shape.type = type;
-            } else {
-                shape.errors["incorrectType"] = `${path} is not a CSV file`;
-            }
-        });
-
-        mime.on("close", (code) => {
-            if (code !== 0 || shape.type === "") {
-                console.warn("unable to use file() cmd");
-            }
-        });
-
-        const readLine = createInterface({
-            input: fs.createReadStream(path),
-            crlfDelay: Infinity,
-        });
-
-        let count = 0;
-        const max = 20;
-
-        // to store the column header if it exists for further checks
-        const first = {
-            row: [''],
-            del: "",
-        };
-
-        // hold the previous line while rl proceeds to next line using \r\n as a delimiter
-        let previous = "";
-
-        // create an array of delimiter from supported delimiter
-        const delimiters = [",", ";", "\t", "|", ":", " ", "|"];
-
-        readLine.on("line", (current) => {
-            if (count === 0) {
-                delimiters.forEach((d) => {
-                    if (current.split(d).length > 1) {
-                        first.row = current.split(d)
-                        first.del = d;
-                    }
-                });
-
-                if (first.del === "" || first.row.length <= 1) {
-                    shape.errors["unrecognizedDelimiter"] = `${path} does not have a recognized delimiter`;
-                    shape.header = false;
-                }
-
-                const isDigit = /\d+/;
-
-                // betting on numbers should not appear as header values
-                const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
-
-                if (hasDigitInHeader) {
-                    shape.header = false;
-                    shape.warnings["noHeader"] = `no header found`;
-                    count++;
-                    return;
-                }
-
-                shape.header = true;
-                shape.delimiter = first.del;
-                shape.columns = first.row;
-            }
-
-            if (count > 0 && count < max) {
-                // there is a chance the record spans next line
-                const inlineQuotes = current.split(`"`).length - 1;
-
-                if (previous) {
-                    if (inlineQuotes % 2 !== 0) {
-                        // TODO: make sure previous + current
-                        // console.log(previous + l);
-                        shape.spanMultipleLines = true;
-                    }
-                }
-                // if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
-                if (
-                    inlineQuotes % 2 !== 0 &&
-                    current.split(`""`).length - 1 !== 1
-                ) {
-                    previous = current;
-                }
-
-                const width = current.split(first.del).length;
-
-                if (width !== first.row.length) {
-                    shape.errors['rowWidthMismatch'] = `row width mismatch`;
-                    return;
-                }
-                shape.preview.push(current.split(first.del));
-            }
-            count++;
-        });
-        return shape;
-    }
 
     #checkFileSize(path: string): number {
         const max = 1024 * 1024 * 50
@@ -618,6 +686,22 @@ class Workflow {
  * @param {string} name - Name of the workflow
  * @returns {Workflow} - New workflow
  */
-export function createWorkflow(name: string): Workflow {
+function createWorkflow(name: string): Workflow {
     return new Workflow(name);
+}
+
+
+/**
+ * Returns a new dataset
+ * @param {string} name - Source of the dataset
+ * @returns {Options} - Options for the dataset
+ */
+function createDataset(source: string, options: DatasetOptions): Dataset {
+    return new Dataset(source, options);
+}
+
+
+export {
+    createDataset,
+    createWorkflow,
 }

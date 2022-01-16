@@ -44,24 +44,21 @@ import download from 'download';
         console.log(mlr + " already downloaded");
     }
 
-    console.log('building muto');
-
-    esbuild.build({
-            entryPoints: [path.join(process.cwd(), "lib/index.ts")],
-            bundle: true,
-            minify: true,
-            sourcemap: true,
-            target: 'es6',
-            platform: 'node',
-            format: 'esm',
-            outfile: path.join(process.cwd(), "dist/muto.js"),
-            plugins: [nodeExternalsPlugin()],
-        }
-    ).catch(() => process.exit(1)).finally(() => {
-        process.exit(0);
+    await esbuild.build({
+        entryPoints: [path.join(process.cwd(), "lib/index.ts")],
+        bundle: true,
+        minify: true,
+        sourcemap: true,
+        target: 'es6',
+        platform: 'node',
+        format: 'esm',
+        outfile: path.join(process.cwd(), "dist/muto.js"),
+        plugins: [nodeExternalsPlugin()],
+    }).catch(err => {
+        console.error(err);
+        process.exit(1);
     }).finally(() => {
-        console.log("done building muto");
-        process.exit(0);
+        console.log('building muto');
     });
 })();
 
