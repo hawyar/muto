@@ -1,93 +1,22 @@
 import * as fs from "fs";
-import {createInterface, Interface} from "readline";
-import path from "path";
 import {readFileSync, writeFileSync} from 'atomically';
-import {CreateMultipartUploadCommand, GetObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3";
+import {CreateMultipartUploadCommand, PutObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3";
 import {fromIni} from "@aws-sdk/credential-providers";
 import {ChildProcessWithoutNullStreams, spawn} from "child_process";
 import os from "os";
-
-enum Delimiters {
-    COMMA = ",",
-    SEMICOLON = ";",
-    PIPE = "|",
-    COLON = ":",
-    TAB = "\t",
-    SPACE = " ",
-    TILDE = "~",
-    DASH = "-",
-    UNDERSCORE = "_"
-}
-
-
-type env = 'local' | 'remote'
-type connectorType = S3Client | fs.ReadStream
-
-
-// TODO: better error message for errors in transform
-type datasetStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
-type ShapeErrType = 'unrecognizedDelimiter' | 'noHeader' | 'invalidFileType' | 'rowWidthMismatch'
-
-
-interface Shape {
-    type: string,
-    columns: Array<string>,
-    header: boolean,
-    encoding: string,
-    bom: boolean,
-    spanMultipleLines: boolean,
-    quotes: boolean,
-    delimiter: string,
-    errors: { [key: string]: string }
-    warnings: { [key: string]: string },
-    preview: string[][],
-}
-
-interface Dataset {
-    source: string
-    cached: boolean
-    options: DatasetOptions;
-    destination: string
-    shape: Shape
-    createdAt: Date;
-    state: datasetStateType
-    connector: connectorType;
-}
-
-interface DatasetOptions {
-    destination: string;
-    columns: Array<string>,
-    header: boolean,
-    quotes: boolean,
-    transform: (row: object) => object
-    delimiter: Delimiters
-}
-
-interface Cache {
-    path: string
-    init: Date
-
-    get(key: string): Dataset | undefined
-
-    set(key: string, value: Dataset): void
-
-    has(key: string): boolean
-
-    delete(key: string): void
-
-    clear(): void
-
-    size(): number
-
-    keys(): string[]
-}
-
-type ProcessResult = {
-    stdout: string,
-    stderr: string,
-    code: number
-}
-
+import path from "path";
+import {createInterface} from "readline";
+import {
+    Cache,
+    connectorType,
+    Dataset,
+    DatasetOptions,
+    datasetStateType,
+    env,
+    mlrCmd,
+    ProcessResult,
+    Shape
+} from "./types"
 
 const credentials = (profile: string) => fromIni({
     profile: profile,
@@ -96,66 +25,154 @@ const credentials = (profile: string) => fromIni({
     },
 });
 
+let s3: S3Client;
 
-const mlrCmd = path.join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
+/**
+ * Creates a new S3 client if one already doesn't exist.
+ *  @param {S3ClientConfig} config
+ *  @returns {S3Client}
+ */
+function s3Client(config: S3ClientConfig) {
+    if (!s3) {
+        console.log('creating s3 client')
+        s3 = new S3Client(config);
+    }
+    return s3;
+}
+
+/**
+ * Parses S3 (s3://) style URIs
+ */
+function parseS3Uri(
+    uri: string,
+    options: {
+        file: boolean;
+    }
+): {
+    data: {
+        bucket: string;
+        key: string;
+        file: string;
+    };
+    err: string;
+} {
+    const opt = {
+        file: options && options.file ? options.file : false,
+    };
+
+    if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
+        throw new Error(`invalid-s3-uri: ${uri}`);
+    }
+
+    let err = "";
+
+    const result = {
+        bucket: "",
+        key: "",
+        file: "",
+    };
+
+    const src = uri.split(":/")[1];
+    const [bucket, ...keys] = src.split("/").splice(1);
+
+    result.bucket = bucket;
+    result.key = keys.join("/");
+
+    keys.forEach((k, i) => {
+        if (i === keys.length - 1) {
+            const last = k.split(".").length;
+            if (opt.file && last === 1) err = `uri should be a given, given: ${uri}`;
+
+            if (!opt.file && last === 1) return;
+
+            if (!opt.file && last > 1) {
+                err = `Invalid S3 uri, ${uri} should not end with a file name`;
+                return;
+            }
+
+            if (!opt.file && k.split(".")[1] !== "" && last > 1)
+                err = `${uri} should not be a file endpoint: ${k}`;
+
+            if (last > 1 && k.split(".")[1] !== "") result.file = k;
+        }
+    });
+    return {
+        data: result,
+        err: err,
+    };
+}
 
 
-class Dataset {
-    source: string
-    destination: string
-    _rowsCount: number
-    options: DatasetOptions
-    createdAt: Date
+/**
+ * Dataset represent a file for processing
+ */
+class _Dataset implements Dataset {
+    source: string;
+    destination: string;
+    addedAt: Date;
+    options: DatasetOptions;
     shape: Shape
+    cached: boolean;
     state: datasetStateType
-    processCount: number
-    cached: boolean
+    connector: connectorType | null
+    env: string
 
     constructor(source: string, options: DatasetOptions) {
         this.source = source;
         this.cached = false;
-        this._rowsCount = 0;
-        this.destination = options.destination || process.cwd()
+        this.destination = options.destination
         this.options = options;
+        this.env = this.determineSource();
         this.shape = {
-            type: '',
+            type: "",
             columns: [],
             header: false,
-            encoding: '',
+            encoding: "",
             bom: false,
+            size: 0,
             spanMultipleLines: false,
             quotes: false,
-            delimiter: '',
+            delimiter: "",
             errors: {},
             warnings: {},
-            preview: []
+            preview: [[]]
         }
-        this.createdAt = new Date();
+        this.addedAt = new Date();
         this.state = 'init'
-        this.processCount = 0
+        this.connector = null
     }
 
+    /**
+     * Convert CSV to JSON
+     * @return {Promise<string>} source of the dataset
+     */
     async toJson(): Promise<string> {
         const write = fs.createWriteStream(this.destination)
 
-        const json = this.#exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source])
+        const json = this.exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source])
 
         json.stdout.pipe(write)
 
-        return new Promise((resolve, reject) => {
-            write.on('close', () => {
-                resolve(this.source)
-            })
-            write.on('error', (err) => {
-                reject(err)
-            })
+        write.on('close', () => {
+            console.log("📝 Dataset converted to JSON")
+            return this.destination
         })
+
+        write.on('error', (err) => {
+            throw new Error(err.message)
+        })
+
+        return this.destination
     }
 
-    async rowsCount(): Promise<number> {
-        const res = await this.#exec(mlrCmd, [`--ojson`, `count`, this.source])
+    /**
+     * Count number of rows
+     * @return {Promise<string>} number of rows
+     */
+    async rowCount(): Promise<number> {
+        const count = await this.exec(mlrCmd, [`--ojson`, `count`, this.source])
 
-        const rowCountExec = await this.#promisifyProcessResult(res)
+        const rowCountExec = await this.promisifyProcessResult(count)
 
         if (rowCountExec.code !== 0) {
             throw new Error(`Error while counting rows: ${rowCountExec.stderr}`)
@@ -170,14 +187,17 @@ class Dataset {
         if (r.length === 0) {
             throw new Error('No rows found')
         }
-        this._rowsCount = r[0].count
         return r[0].count
     }
 
+    /**
+     * Extracts the header row from the dataset, defined columns
+     * @return Promise<string[] | null> header row or null if no header
+     */
     async columns(): Promise<string[] | null> {
-        const res = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
+        const res = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
 
-        const colExec = await this.#promisifyProcessResult(res)
+        const colExec = await this.promisifyProcessResult(res)
 
         if (colExec.code !== 0) {
             return null
@@ -187,7 +207,6 @@ class Dataset {
             throw new Error(colExec.stderr)
         }
         const columns = JSON.parse(colExec.stdout)
-
 
         if (columns.length === 0) {
             this.shape.header = false
@@ -200,8 +219,14 @@ class Dataset {
         return this.shape.columns
     }
 
-    async preview(count: number, streamTo?: string): Promise<string[][] | string> {
-
+    /**
+     * Extracts rows from the dataset for preview.
+     * If the dataset is too large to preview then it will stream the result
+     * @param {number} count - number of rows to preview
+     * @param {string} streamTo - path to the file to stream to
+     * @return Promise<string[][] | string> - preview rows or path to the file the preview was streamed to
+     */
+    async preview(count = 20, streamTo?: string): Promise<string[][] | string> {
         let write: fs.WriteStream
 
         const maxPreview = 1024 * 1024 * 10
@@ -210,23 +235,21 @@ class Dataset {
         const stat = await fsp.stat(this.source)
 
         if (streamTo && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream || stat.size > maxPreview) {
-            try {
-                if (streamTo === undefined) throw new Error('stream-destination-undefined')
-                write = fs.createWriteStream(streamTo)
-            } catch (err) {
-                throw new Error(`${streamTo} is not writable`)
-            }
 
-            const previewExec = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+            if (streamTo === undefined) throw new Error('stream-destination-undefined')
+            write = fs.createWriteStream(streamTo)
+
+            const previewExec = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+
             previewExec.stdout.pipe(write)
 
             console.warn(`👀 Preview saved to: ${streamTo}`)
             return streamTo
         }
 
-        const previewExec = await this.#exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+        const previewExec = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
 
-        const prev = await this.#promisifyProcessResult(previewExec)
+        const prev = await this.promisifyProcessResult(previewExec)
 
         if (prev.stderr) {
             throw new Error(prev.stderr)
@@ -236,13 +259,288 @@ class Dataset {
             throw new Error(`Error while executing mlr command`)
         }
 
-        const parsed = JSON.parse(prev.stdout)
-        this.shape.preview = parsed
+        this.shape.preview = JSON.parse(prev.stdout)
 
         return this.shape.preview
     }
 
-    #promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult> {
+    async uploadToS3(): Promise<string> {
+        const fStream = fs.createReadStream(this.source)
+
+        if (!fStream.readable) {
+            throw new Error('failed-to-read-source: Make sure the provided file is readable')
+        }
+
+        const {data: uri, err} = parseS3Uri(this.destination, {
+            file: true,
+        });
+
+
+        if (err.toString().startsWith(`invalid-s3-uri`)) {
+            throw new Error(`failed-to-parse-s3-uri: ${err}`)
+        }
+
+        if (!uri.file) {
+            uri.file = path.basename(this.source)
+        }
+
+        console.log(`uploading ${this.source} to ${this.destination}`);
+
+        const s3 = s3Client({
+            region: "us-east-2",
+        })
+
+        const res = await s3.send(new PutObjectCommand({
+            Bucket: uri.bucket,
+            Key: uri.key + uri.file,
+            Body: fStream,
+        })).catch(err => {
+            throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
+        }).finally(() => {
+            fStream.close()
+        })
+        if (res.$metadata.httpStatusCode !== 200) {
+            throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
+        }
+        if (!res.ETag) {
+            throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.ETag}`)
+        }
+        console.log(`uploaded successfully`)
+        return res.ETag
+    }
+
+    async detectShape(): Promise<Shape> {
+        const path = this.source
+        const shape: Shape = {
+            type: '',
+            size: 0,
+            columns: [''],
+            header: false,
+            encoding: 'utf-8',
+            bom: false,
+            spanMultipleLines: false,
+            quotes: false,
+            delimiter: ',',
+            errors: {},
+            warnings: {},
+            preview: [['']],
+        };
+
+        if (!fs.existsSync(path)) {
+            throw new Error(`path-doesnt-exists: ${path} ,provide a valid path to a CSV file`)
+        }
+
+        const stat = fs.statSync(path)
+
+        this.shape.size = stat.size
+
+        if (stat.size > 1024 * 1024 * 1024) {
+            throw new Error(`file-size-exceeds-limit: ${path} is too large, please limit to under 1GB for now`)
+        }
+
+        if (!fs.existsSync(path)) {
+            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
+        }
+
+        if (os.platform() === "win32") {
+            // TODO: handle
+            throw new Error(`scream`)
+        }
+
+        const mime = this.exec("file", [path, "--mime-type"])
+
+        mime.stdout.on("data", (data) => {
+            const type = data.toString().split(":")[1].trim();
+            console.log(type)
+
+            if (type === "text/csv" || type === "text/plain") {
+                this.shape.type = type;
+                return;
+            }
+            this.shape.errors["incorrectType"] = `${path} is not a CSV file`;
+            throw new Error(`unsupported-file-type: ${path} is not a CSV file`)
+        });
+
+        mime.stderr.on("error", (err) => {
+            console.warn(err);
+        });
+
+        mime.on("close", (code) => {
+            if (code !== 0 || this.shape.type === "") {
+                console.warn("unable to use file()");
+            }
+        });
+
+        const readLine = createInterface({
+            input: fs.createReadStream(path),
+            crlfDelay: Infinity,
+        });
+
+        let count = 0;
+        const max = 20;
+
+        // to store the column header if it exists for further checks
+        const first = {
+            row: [''],
+            del: "",
+        };
+
+        // hold the previous line while rl proceeds to next line using \r\n as a delimiter
+        let previous = "";
+
+        const delimiters = [",", ";", "\t", "|", ":", " ", "|"];
+
+        readLine.on("line", (current) => {
+            if (count === 0) {
+                delimiters.forEach((d) => {
+                    if (current.split(d).length > 1) {
+                        first.row = current.split(d)
+                        first.del = d;
+                    }
+                });
+
+                if (first.del === "" || first.row.length <= 1) {
+                    shape.errors["unrecognizedDelimiter"] = `${path} does not have a recognized delimiter`;
+                    shape.header = false;
+                }
+                const isDigit = /\d+/;
+
+                // assuming that numbers shouldn't start as column header
+                // const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
+                //
+                // if (hasDigitInHeader) {
+                //     shape.header = false;
+                //     shape.warnings["noHeader"] = `no header found`;
+                //     count++;
+                //     return;
+                // }
+
+                shape.header = true;
+                shape.delimiter = first.del;
+                shape.columns = first.row;
+            }
+
+            if (count > 0 && count < max) {
+                // there is a chance the record spans next line
+                const inlineQuotes = current.split(`"`).length - 1;
+
+                if (previous) {
+                    if (inlineQuotes % 2 !== 0) {
+                        // TODO: make sure previous + current
+                        // console.log(previous + l);
+                        shape.spanMultipleLines = true;
+                    }
+                }
+                // if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
+                if (
+                    inlineQuotes % 2 !== 0 &&
+                    current.split(`""`).length - 1 !== 1
+                ) {
+                    previous = current;
+                }
+
+                const width = current.split(first.del).length;
+
+                if (width !== first.row.length) {
+                    shape.errors['rowWidthMismatch'] = `row width mismatch`;
+                    return;
+                }
+                shape.preview.push(current.split(first.del));
+            }
+            count++;
+        });
+        return shape;
+    }
+
+    determineConnector(): connectorType {
+        const env = this.determineSource();
+        if (env === "local") {
+            const stream = fs.createReadStream(this.source);
+            return stream
+        }
+
+        if (env === "aws") {
+            const client = s3Client({
+                credentials: credentials("default"),
+                region: "us-east-2",
+            });
+            return client
+        }
+        throw new Error(`unsupported-source for: ${this.source}`)
+    }
+
+    determineSource(): string {
+        if (
+            this.source.startsWith("/") ||
+            this.source.startsWith("../") ||
+            this.source.startsWith("./")
+        ) {
+            return "local";
+        }
+
+        if (this.source.startsWith("s3://")) {
+            return "remote";
+        }
+
+        throw new Error(`invalid-source-type: ${this.source}`);
+    }
+
+    fileSize(): number {
+        const max = 1024 * 1024 * 50
+
+        if (!fs.existsSync(this.source)) {
+            throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`)
+        }
+
+        const stat = fs.statSync(this.source)
+
+        if (stat.size > max) {
+            throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`)
+        }
+        return stat.size
+    }
+
+    /**
+     * Initiates a multipart upload and returns an upload ID
+     * @returns {string} uploadID
+     * @private
+     */
+    async initMultipartUpload(
+        bucket: string,
+        key: string
+    ): Promise<string> {
+
+        const client = s3Client({
+            credentials: credentials("default"),
+            region: "us-east-2",
+        });
+
+        const command = new CreateMultipartUploadCommand({
+            Bucket: bucket,
+            ContentEncoding: "utf8",
+            ContentType: "text/csv",
+            Key: key,
+        });
+
+        const result = await client.send(command);
+
+        if (result.$metadata.httpStatusCode !== 200) {
+            throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`)
+        }
+
+        if (!result.UploadId) {
+            throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`)
+        }
+
+        return result.UploadId
+    }
+
+    exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams {
+        console.log(`📝 executing: ${cmd} ${args.join(' ')}`)
+        return spawn(cmd, args)
+    }
+
+    promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult> {
         const result: ProcessResult = {
             stdout: '',
             stderr: '',
@@ -268,47 +566,15 @@ class Dataset {
             })
         })
     }
+}
 
-
-    #exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams {
-        this.processCount++
-        return spawn(cmd, args)
-    }
-
-    async #fileType(): Promise<void> {
-        const path = this.source;
-
-        if (!fs.existsSync(path)) {
-            throw new Error(`${path} does not exist, provide a valid path to a CSV file`)
-        }
-
-        if (os.platform() === "win32") {
-            // TODO: handle
-            return;
-        }
-
-        const mime = this.#exec("file", [path, "--mime-type"])
-
-        mime.stdout.on("data", (data) => {
-            const type = data.toString().split(":")[1].trim();
-
-            if (type === "text/csv" || type === "text/plain") {
-                this.shape.type = type;
-            } else {
-                this.shape.errors["incorrectType"] = `${path} is not a CSV file`;
-            }
-        });
-
-        mime.stderr.on("error", (err) => {
-            console.warn(err);
-        });
-
-        mime.on("close", (code) => {
-            if (code !== 0 || this.shape.type === "") {
-                console.warn("unable to use file() cmd");
-            }
-        });
-    }
+/**
+ * Returns a new dataset
+ * @param {string} source - Source of the dataset
+ * @returns {Options} options - Options for the dataset
+ */
+function createDataset(source: string, options: DatasetOptions): Dataset {
+    return new _Dataset(source, options);
 }
 
 
@@ -392,58 +658,6 @@ const cache = (function (): { getInstance: () => Cache } {
     }
 })()
 
-function s3Connector(config: S3ClientConfig) {
-    const client = new S3Client(config);
-    return Object.freeze({
-        getObject: (command: GetObjectCommand) => client.send(command),
-        createMultipartUpload: (command: CreateMultipartUploadCommand) => client.send(command),
-    });
-}
-
-function fsConnector(filePath: string) {
-    return Object.freeze({
-        readStream(): Promise<fs.ReadStream> {
-            return new Promise((resolve, reject) => {
-                const stream = fs.createReadStream(filePath);
-                stream.on('error', (err) => {
-                    reject(err);
-                });
-                stream.on('open', () => {
-                    resolve(stream);
-                });
-            });
-        },
-        writeStream(): Promise<fs.WriteStream> {
-            return new Promise((resolve, reject) => {
-                const stream = fs.createWriteStream(filePath);
-                stream.on('error', (err) => {
-                    reject(err);
-                });
-                stream.on('open', () => {
-                    resolve(stream);
-                });
-            });
-        },
-        readline(): Promise<Interface> {
-            return new Promise((resolve, reject) => {
-                const stream = fs.createReadStream(filePath);
-                stream.on('error', (err) => {
-                    reject(err);
-                });
-                stream.on('open', () => {
-                    const rl = createInterface({
-                        input: stream,
-                        crlfDelay: Infinity
-                    });
-                    resolve(rl);
-                });
-            });
-        },
-
-    })
-}
-
-
 class Workflow {
     name: string;
     datasets: Map<string, Dataset>;
@@ -476,210 +690,13 @@ class Workflow {
             return source
         }
 
-        const dataset = new Dataset(source, options);
+        const dataset = new _Dataset(source, options);
 
-        const defaultPreviewCount = 10
-
-        await Promise.all([dataset.columns(), dataset.preview(defaultPreviewCount), dataset.toJson()]);
-
-        console.log(dataset);
         this.datasets.set(source, dataset);
-        this.lcache.set(source, dataset)
         return source
     }
-
-    /**
-     * Checks if file exists in a S3 bucket
-     * @param source
-     * @param options
-     * @returns
-     */
-    #existsInS3(source: string): boolean {
-        const {data, err} = this.#parseS3URI(source, {
-            file: true,
-        });
-
-        if (err || !data.file) {
-            console.error(`Invalid S3 URI: ${source}, URI must point to a file`);
-            return false;
-        }
-
-        const conn = this.#s3Connector({
-            credentials: credentials("default"),
-            region: "us-east-2",
-        });
-
-        const getObjectCommand = new GetObjectCommand({
-            Bucket: data.bucket,
-            Key: data.file,
-        });
-
-        conn.send(getObjectCommand).then((res) => {
-                if (res.$metadata.httpStatusCode === 200 && res.ContentType === "text/csv") {
-                    return true
-                }
-                return false
-            }
-        ).catch((err) => {
-            console.error(err);
-            return false;
-        });
-        return false
-    }
-
-    #determineSource(source: string): string {
-        if (
-            source.startsWith("/") ||
-            source.startsWith("../") ||
-            source.startsWith("./")
-        ) {
-            return "local";
-        }
-
-        if (source.startsWith("s3://")) {
-            return "s3";
-        }
-
-        throw new Error(`invalid-source-type: ${source}`);
-    }
-
-    /**
-     * Returns a readable stream for a local file
-     * @param path
-     * @returns {fs.Dirent[]}
-     */
-    #fsConnector(path: string): fs.ReadStream {
-        return fs.createReadStream(path);
-    }
-
-    #s3Connector(opt: S3ClientConfig): S3Client {
-        if (!opt.region) {
-            opt.region = 'us-east-2';
-        }
-        return new S3Client(opt);
-    }
-
-
-    #checkFileSize(path: string): number {
-        const max = 1024 * 1024 * 50
-        if (!fs.existsSync(path)) {
-            throw new Error(`path-doesnt-exists: ${path} ,provide a valid path to a CSV file`)
-        }
-        const file = fs.statSync(path)
-
-        if (file.size > max) {
-            throw new Error(`file-size-exceeds-limit: ${path} is too large, please limit to 50MB`)
-        }
-        return fs.statSync(path).size
-    }
-
-    /**
-     * Initiates a multipart upload and returns an upload ID
-     * @returns {string} uploadID
-     * @private
-     */
-    #initMultipartUpload(
-        d: Dataset,
-        bucket: string,
-        key: string
-    ): Promise<string> {
-        return new Promise((resolve, reject) => {
-            try {
-                const conn = this.#s3Connector({
-                    credentials: credentials("default"),
-                    region: "us-east-2",
-                });
-
-                if (!(conn instanceof S3Client))
-                    // TODO: dont throw here, throw in the caller
-                    throw new Error(`invalid-operation: Invalid operation for ${d.source}`);
-
-                const command = new CreateMultipartUploadCommand({
-                    Bucket: bucket,
-                    ContentEncoding: "utf8",
-                    ContentType: "text/csv",
-                    Key: key,
-                });
-
-                conn
-                    .send(command)
-                    .then((data) => {
-                        if (data.UploadId) {
-                            resolve(data.UploadId);
-                        }
-                        reject(new Error("noop"))
-                    })
-                    .catch((error) => {
-                        reject(error);
-                    })
-                    .finally(() => {
-                        console.log("init multipart upload");
-                    });
-            } catch (err) {
-                reject(err);
-            }
-        });
-    }
-
-    #parseS3URI(
-        uri: string,
-        options: {
-            file: boolean;
-        }
-    ): {
-        data: {
-            bucket: string;
-            key: string;
-            file: string;
-        };
-        err: string;
-    } {
-        const opt = {
-            file: options && options.file ? options.file : false,
-        };
-
-        if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
-            throw new Error(`invalid-s3-uri: ${uri}`);
-        }
-
-        let err = "";
-
-        const result = {
-            bucket: "",
-            key: "",
-            file: "",
-        };
-
-        const src = uri.split(":/")[1];
-        const [bucket, ...keys] = src.split("/").splice(1);
-
-        result.bucket = bucket;
-        result.key = keys.join("/");
-
-        keys.forEach((k, i) => {
-            if (i === keys.length - 1) {
-                const last = k.split(".").length;
-                if (opt.file && last === 1) err = `uri should be a given, given: ${uri}`;
-
-                if (!opt.file && last === 1) return;
-
-                if (!opt.file && last > 1) {
-                    err = `Invalid S3 uri, ${uri} should not end with a file name`;
-                    return;
-                }
-
-                if (!opt.file && k.split(".")[1] !== "" && last > 1)
-                    err = `${uri} should not be a file endpoint: ${k}`;
-
-                if (last > 1 && k.split(".")[1] !== "") result.file = k;
-            }
-        });
-        return {
-            data: result,
-            err: err,
-        };
-    }
 }
+
 
 /**
  * Returns a new workflow
@@ -688,16 +705,6 @@ class Workflow {
  */
 function createWorkflow(name: string): Workflow {
     return new Workflow(name);
-}
-
-
-/**
- * Returns a new dataset
- * @param {string} name - Source of the dataset
- * @returns {Options} - Options for the dataset
- */
-function createDataset(source: string, options: DatasetOptions): Dataset {
-    return new Dataset(source, options);
 }
 
 

@@ -1,60 +1,82 @@
 import tap from "tap"
 import path from "path"
-import {createDataset, createWorkflow} from "../dist/muto.js";
+import {createDataset} from "../dist/muto.js";
+import {createReadStream} from "fs";
 
-tap.test("new dataset, columns and preview", async (t) => {
+tap.test("dataset", async (t) => {
     const source = path.join(process.cwd(), "tests", "fixtures", "albums.csv")
 
     const dataset = createDataset(source, {
         delimiter: ",",
     })
 
-    await dataset.preview(10)
-    const cols = await dataset.columns()
-
-    const wanted = `id,artist_id,album_title,genre,year_of_pub,num_of_tracks,num_of_sales,rolling_stone_critic,mtv_critic,music_maniac_critic`
-
-    t.same(dataset.source, source)
-    t.same(cols, wanted.split(","))
-});
-
-tap.test("new dataset, columns and stream preview", async (t) => {
-    const source = path.join(process.cwd(), "tests", "fixtures", "albums.csv")
-
-    const dataset = createDataset(source, {
-        delimiter: ",",
+    t.test("get column header", async (t) => {
+        const columns = await dataset.columns().catch(t.fail)
+        const wanted = `id,artist_id,album_title,genre,year_of_pub,num_of_tracks,num_of_sales,rolling_stone_critic,mtv_critic,music_maniac_critic`
+        t.same(columns, wanted.split(","))
+        t.end()
     })
 
-    const streamTo = path.join(process.cwd(), "tests", "fixtures", "preview-streamed.csv")
-    await dataset.preview(100, streamTo)
-    const cols = await dataset.columns()
 
-    const wanted = `id,artist_id,album_title,genre,year_of_pub,num_of_tracks,num_of_sales,rolling_stone_critic,mtv_critic,music_maniac_critic`
-
-    t.same(dataset.source, source)
-    t.same(cols, wanted.split(","))
-});
-
-
-tap.test("count rows", async (t) => {
-
-    const wanted = 10691
-    const source = path.join(process.cwd(), "tests", "fixtures", "543.csv")
-
-    const dataset = createDataset(source, {
-        delimiter: ",",
+    t.test("preview first couple of rows", async (t) => {
+        const prev = await dataset.preview().catch(t.fail)
+        // TODO: pull 10 rows from the dataset
+        t.ok(prev)
+        t.end()
+    })
+    t.test("correct connector", async (t) => {
+        const conn = dataset.determineConnector()
+        t.same(conn.readable, createReadStream(source).readable)
+        t.end()
     })
 
-    const rows = await dataset.rowsCount()
-    t.same(rows, wanted)
+    t.test("row count", async (t) => {
+        const source = path.join(process.cwd(), "tests", "fixtures", "543.csv")
+
+        const dataset = createDataset(source, {
+            delimiter: ",",
+        })
+
+        const rows = await dataset.rowCount()
+        const wanted = 10691
+
+        t.same(rows, wanted)
+        t.end()
+    })
 });
 
+// tap.test("count rows", async (t) => {
+//
+//     const wanted = 10691
+//     const source = path.join(process.cwd(), "tests", "fixtures", "543.csv")
+//
+//     const dataset = createDataset(source, {
+//         delimiter: ",",
+//     })
+//
+//     const rows = await dataset.rowCount()
+//     t.same(rows, wanted)
+// });
 
-tap.test("new workflow", async (t) => {
-    const work = createWorkflow("my_etl");
-    t.same(work.name, "my_etl")
-    t.end();
-});
+// tap.test("send to s3", async (t) => {
+//     const source = path.join(process.cwd(), "tests", "fixtures", "543.csv")
+//
+//     const dataset = createDataset(source, {
+//         delimiter: ",",
+//         destination: "s3://hwyr-cms/toS3/",
+//     })
+//
+//     const put = await dataset.sendToS3()
+//     console.log(put)
+//     t.pass(put)
+// });
+
+
+// tap.test("new workflow", async (t) => {
+//     const work = createWorkflow("my_etl");
+//     t.same(work.name, "my_etl")
+//     t.end();
+// });
 
 // tap.test("add dataset", async (t) => {
 //     const work = createWorkflow("my_etl")

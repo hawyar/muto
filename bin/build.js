@@ -58,7 +58,7 @@ import download from 'download';
         console.error(err);
         process.exit(1);
     }).finally(() => {
-        console.log('building muto');
+        console.log('built muto');
     });
 })();
 
