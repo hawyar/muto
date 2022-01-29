@@ -47,7 +47,7 @@ import download from 'download';
     await esbuild.build({
         entryPoints: [path.join(process.cwd(), "lib/index.ts")],
         bundle: true,
-        minify: true,
+        minify: false,
         sourcemap: true,
         target: 'es6',
         platform: 'node',
@@ -59,6 +59,24 @@ import download from 'download';
         process.exit(1);
     }).finally(() => {
         console.log('built muto');
+    });
+
+
+    await esbuild.build({
+        entryPoints: [path.join(process.cwd(), "bin/cli.js")],
+        bundle: true,
+        minify: false,
+        sourcemap: true,
+        target: 'es6',
+        platform: 'node',
+        format: 'esm',
+        outfile: path.join(process.cwd(), "dist/cli.js"),
+        plugins: [nodeExternalsPlugin()],
+    }).catch(err => {
+        console.error(err);
+        process.exit(1);
+    }).finally(() => {
+        console.log("built cli");
     });
 })();
 

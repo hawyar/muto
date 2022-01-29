@@ -2,6 +2,7 @@ import * as fs from "fs";
 import {readFileSync, writeFileSync} from 'atomically';
 import {CreateMultipartUploadCommand, PutObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3";
 import {fromIni} from "@aws-sdk/credential-providers";
+import {AthenaClient, AthenaClientConfig} from "@aws-sdk/client-athena";
 import {ChildProcessWithoutNullStreams, spawn} from "child_process";
 import os from "os";
 import path from "path";
@@ -26,19 +27,36 @@ const credentials = (profile: string) => fromIni({
 });
 
 let s3: S3Client;
+let athena: AthenaClient
 
 /**
  * Creates a new S3 client if one already doesn't exist.
  *  @param {S3ClientConfig} config
  *  @returns {S3Client}
  */
-function s3Client(config: S3ClientConfig) {
+function s3Client(config: S3ClientConfig): S3Client {
     if (!s3) {
         console.log('creating s3 client')
         s3 = new S3Client(config);
     }
     return s3;
 }
+
+/**
+ * Creates a new athena client if one already doesn't exist.
+ *  @param {AthenaClientConfig} config
+ *  @returns {AthenaClient}
+ */
+function athenaClient(config: AthenaClientConfig): AthenaClient {
+    if (!s3) {
+        console.log('creating athena client')
+        athena = new AthenaClient(config);
+    }
+    return athena;
+}
+
+// TODO: amke sure dataet is uploaded to s3,  prepare athena query, run athena query, create function query(``)
+
 
 /**
  * Parses S3 (s3://) style URIs
@@ -102,7 +120,6 @@ function parseS3Uri(
     };
 }
 
-
 /**
  * Dataset represent a file for processing
  */
@@ -142,6 +159,10 @@ class _Dataset implements Dataset {
         this.connector = null
     }
 
+    setDestination(destination: string) {
+        this.destination = destination
+    }
+
     /**
      * Convert CSV to JSON
      * @return {Promise<string>} source of the dataset
@@ -150,7 +171,6 @@ class _Dataset implements Dataset {
         const write = fs.createWriteStream(this.destination)
 
         const json = this.exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source])
-
         json.stdout.pipe(write)
 
         write.on('close', () => {
@@ -161,7 +181,6 @@ class _Dataset implements Dataset {
         write.on('error', (err) => {
             throw new Error(err.message)
         })
-
         return this.destination
     }
 
@@ -187,6 +206,7 @@ class _Dataset implements Dataset {
         if (r.length === 0) {
             throw new Error('No rows found')
         }
+
         return r[0].count
     }
 
@@ -194,7 +214,7 @@ class _Dataset implements Dataset {
      * Extracts the header row from the dataset, defined columns
      * @return Promise<string[] | null> header row or null if no header
      */
-    async columns(): Promise<string[] | null> {
+    async getColumnHeader(): Promise<string[] | null> {
         const res = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
 
         const colExec = await this.promisifyProcessResult(res)
@@ -215,13 +235,28 @@ class _Dataset implements Dataset {
 
         this.shape.columns = Object.keys(columns[0])
         this.shape.header = true
+        return this.shape.columns
+    }
+
+    async formatValues() {
+        // --opprint format-values
+        const res = await this.exec(mlrCmd, [`--icsv`, `format-values`, this.source])
+        const formatVal = await this.promisifyProcessResult(res)
+
+        if (formatVal.code !== 0) {
+            return null
+        }
+
+        if (formatVal.stderr) {
+            throw new Error(formatVal.stderr)
+        }
 
         return this.shape.columns
     }
 
     /**
      * Extracts rows from the dataset for preview.
-     * If the dataset is too large to preview then it will stream the result
+     * If the dataset is too large to preview then it will stream the result and return the file path
      * @param {number} count - number of rows to preview
      * @param {string} streamTo - path to the file to stream to
      * @return Promise<string[][] | string> - preview rows or path to the file the preview was streamed to
@@ -260,54 +295,9 @@ class _Dataset implements Dataset {
         }
 
         this.shape.preview = JSON.parse(prev.stdout)
-
         return this.shape.preview
     }
 
-    async uploadToS3(): Promise<string> {
-        const fStream = fs.createReadStream(this.source)
-
-        if (!fStream.readable) {
-            throw new Error('failed-to-read-source: Make sure the provided file is readable')
-        }
-
-        const {data: uri, err} = parseS3Uri(this.destination, {
-            file: true,
-        });
-
-
-        if (err.toString().startsWith(`invalid-s3-uri`)) {
-            throw new Error(`failed-to-parse-s3-uri: ${err}`)
-        }
-
-        if (!uri.file) {
-            uri.file = path.basename(this.source)
-        }
-
-        console.log(`uploading ${this.source} to ${this.destination}`);
-
-        const s3 = s3Client({
-            region: "us-east-2",
-        })
-
-        const res = await s3.send(new PutObjectCommand({
-            Bucket: uri.bucket,
-            Key: uri.key + uri.file,
-            Body: fStream,
-        })).catch(err => {
-            throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
-        }).finally(() => {
-            fStream.close()
-        })
-        if (res.$metadata.httpStatusCode !== 200) {
-            throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
-        }
-        if (!res.ETag) {
-            throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.ETag}`)
-        }
-        console.log(`uploaded successfully`)
-        return res.ETag
-    }
 
     async detectShape(): Promise<Shape> {
         const path = this.source
@@ -331,7 +321,6 @@ class _Dataset implements Dataset {
         }
 
         const stat = fs.statSync(path)
-
         this.shape.size = stat.size
 
         if (stat.size > 1024 * 1024 * 1024) {
@@ -349,27 +338,17 @@ class _Dataset implements Dataset {
 
         const mime = this.exec("file", [path, "--mime-type"])
 
-        mime.stdout.on("data", (data) => {
-            const type = data.toString().split(":")[1].trim();
-            console.log(type)
+        const mimeRes = await this.promisifyProcessResult(mime)
 
-            if (type === "text/csv" || type === "text/plain") {
-                this.shape.type = type;
-                return;
-            }
-            this.shape.errors["incorrectType"] = `${path} is not a CSV file`;
-            throw new Error(`unsupported-file-type: ${path} is not a CSV file`)
-        });
+        if (mimeRes.stderr) {
+            throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
+        }
 
-        mime.stderr.on("error", (err) => {
-            console.warn(err);
-        });
+        if (mimeRes.code !== 0) {
+            throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
+        }
 
-        mime.on("close", (code) => {
-            if (code !== 0 || this.shape.type === "") {
-                console.warn("unable to use file()");
-            }
-        });
+        const mimeType = mimeRes.stdout.trim()
 
         const readLine = createInterface({
             input: fs.createReadStream(path),
@@ -379,7 +358,6 @@ class _Dataset implements Dataset {
         let count = 0;
         const max = 20;
 
-        // to store the column header if it exists for further checks
         const first = {
             row: [''],
             del: "",
@@ -406,15 +384,13 @@ class _Dataset implements Dataset {
                 const isDigit = /\d+/;
 
                 // assuming that numbers shouldn't start as column header
-                // const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
-                //
+                const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
                 // if (hasDigitInHeader) {
                 //     shape.header = false;
                 //     shape.warnings["noHeader"] = `no header found`;
                 //     count++;
                 //     return;
                 // }
-
                 shape.header = true;
                 shape.delimiter = first.del;
                 shape.columns = first.row;
@@ -500,6 +476,60 @@ class _Dataset implements Dataset {
         return stat.size
     }
 
+    async uploadToS3(): Promise<string> {
+        if (!this.source || !this.destination) {
+            throw new Error('source or destination not set. Both must be defined to upload to S3')
+        }
+
+        const fStream = fs.createReadStream(this.source)
+
+        if (!fStream.readable) {
+            throw new Error('failed-to-read-source: Make sure the provided file is readable')
+        }
+
+        const fSize = this.fileSize()
+
+        if (fSize > 100 * 1024 * 1024) {
+            //TODO: init multipart upload then upload parts
+            console.warn(`file size ${fSize} is larger than 100MB`)
+        }
+
+        const {data: uri, err} = parseS3Uri(this.destination, {
+            file: true,
+        });
+
+        if (err.toString().startsWith(`invalid-s3-uri`)) {
+            throw new Error(`failed-to-parse-s3-uri: ${err}`)
+        }
+
+        if (!uri.file) {
+            uri.file = path.basename(this.source)
+            console.warn("Destination filename not provided. Using source source basename" + uri.file)
+        }
+
+        console.log(`uploading ${this.source} to ${this.destination}`);
+
+        const s3 = s3Client({
+            region: "us-east-2",
+        })
+
+        const res = await s3.send(new PutObjectCommand({
+            Bucket: uri.bucket,
+            Key: uri.key + uri.file,
+            Body: fStream,
+        })).catch(err => {
+            throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
+        }).finally(() => {
+            fStream.close()
+        })
+        if (res.$metadata.httpStatusCode !== 200) {
+            throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
+        }
+
+        if (!res.$metadata.requestId) throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
+        return res.$metadata.requestId
+    }
+
     /**
      * Initiates a multipart upload and returns an upload ID
      * @returns {string} uploadID
@@ -536,7 +566,7 @@ class _Dataset implements Dataset {
     }
 
     exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams {
-        console.log(`📝 executing: ${cmd} ${args.join(' ')}`)
+        console.log(`exec: ${cmd} ${args.join(' ')}`)
         return spawn(cmd, args)
     }
 
@@ -573,10 +603,15 @@ class _Dataset implements Dataset {
  * @param {string} source - Source of the dataset
  * @returns {Options} options - Options for the dataset
  */
-function createDataset(source: string, options: DatasetOptions): Dataset {
-    return new _Dataset(source, options);
+export function createDataset(source: string, options: DatasetOptions): Dataset {
+    const d = new _Dataset(source, options);
+    Promise.all([d.detectShape(), d.determineSource(), d.determineConnector()]).then((val) => {
+        // console.log(val)
+    }).catch((err) => {
+        throw new Error(err)
+    })
+    return d;
 }
-
 
 const cache = (function (): { getInstance: () => Cache } {
     let cache: Cache;
@@ -663,14 +698,15 @@ class Workflow {
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
-    lcache: Cache
+    lcache: Cache | null
 
     constructor(name: string) {
         this.name = name;
         this.datasets = new Map();
         this.createdAt = new Date();
         this.env = 'local';
-        this.lcache = cache.getInstance()
+        this.lcache = null;
+        // this.lcache = cache.getInstance()
     }
 
     list(): Dataset[] {
@@ -686,10 +722,9 @@ class Workflow {
             console.warn(`destination-not-provided: provide a destination for ${source}`);
         }
 
-        if (this.lcache.has(source)) {
-            return source
-        }
-
+        // if (this.lcache.has(source)) {
+        //     return source
+        // }
         const dataset = new _Dataset(source, options);
 
         this.datasets.set(source, dataset);
@@ -703,12 +738,6 @@ class Workflow {
  * @param {string} name - Name of the workflow
  * @returns {Workflow} - New workflow
  */
-function createWorkflow(name: string): Workflow {
+export function createWorkflow(name: string): Workflow {
     return new Workflow(name);
-}
-
-
-export {
-    createDataset,
-    createWorkflow,
 }

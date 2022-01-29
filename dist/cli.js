@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
@@ -19,7 +20,10 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 
-// lib/engine.ts
+// bin/cli.js
+import arg from "arg";
+
+// dist/muto.js
 import * as fs from "fs";
 import { readFileSync, writeFileSync } from "atomically";
 import { CreateMultipartUploadCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -29,15 +33,31 @@ import { spawn } from "child_process";
 import os from "os";
 import path from "path";
 import { createInterface } from "readline";
-
-// lib/types.ts
 import { join } from "path";
+var __async2 = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
 var mlrCmd = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
-
-// lib/engine.ts
 var credentials = (profile) => fromIni({
   profile,
-  mfaCodeProvider: (mfaSerial) => __async(void 0, null, function* () {
+  mfaCodeProvider: (mfaSerial) => __async2(void 0, null, function* () {
     return mfaSerial;
   })
 });
@@ -117,7 +137,7 @@ var _Dataset = class {
     this.destination = destination;
   }
   toJson() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const write = fs.createWriteStream(this.destination);
       const json = this.exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source]);
       json.stdout.pipe(write);
@@ -132,7 +152,7 @@ var _Dataset = class {
     });
   }
   rowCount() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const count = yield this.exec(mlrCmd, [`--ojson`, `count`, this.source]);
       const rowCountExec = yield this.promisifyProcessResult(count);
       if (rowCountExec.code !== 0) {
@@ -149,7 +169,7 @@ var _Dataset = class {
     });
   }
   getColumnHeader() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const res = yield this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source]);
       const colExec = yield this.promisifyProcessResult(res);
       if (colExec.code !== 0) {
@@ -169,7 +189,7 @@ var _Dataset = class {
     });
   }
   formatValues() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const res = yield this.exec(mlrCmd, [`--icsv`, `format-values`, this.source]);
       const formatVal = yield this.promisifyProcessResult(res);
       if (formatVal.code !== 0) {
@@ -182,7 +202,7 @@ var _Dataset = class {
     });
   }
   preview(count = 20, streamTo) {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       let write;
       const maxPreview = 1024 * 1024 * 10;
       const fsp = fs.promises;
@@ -209,7 +229,7 @@ var _Dataset = class {
     });
   }
   detectShape() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const path2 = this.source;
       const shape = {
         type: "",
@@ -336,7 +356,7 @@ var _Dataset = class {
     return stat.size;
   }
   uploadToS3() {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       if (!this.source || !this.destination) {
         throw new Error("source or destination not set. Both must be defined to upload to S3");
       }
@@ -380,7 +400,7 @@ var _Dataset = class {
     });
   }
   initMultipartUpload(bucket, key) {
-    return __async(this, null, function* () {
+    return __async2(this, null, function* () {
       const client = s3Client({
         credentials: credentials("default"),
         region: "us-east-2"
@@ -401,9 +421,9 @@ var _Dataset = class {
       return result.UploadId;
     });
   }
-  exec(cmd, args) {
-    console.log(`exec: ${cmd} ${args.join(" ")}`);
-    return spawn(cmd, args);
+  exec(cmd, args2) {
+    console.log(`exec: ${cmd} ${args2.join(" ")}`);
+    return spawn(cmd, args2);
   }
   promisifyProcessResult(child) {
     const result = {
@@ -505,36 +525,84 @@ var cache = function() {
     }
   };
 }();
-var Workflow = class {
-  constructor(name) {
-    this.name = name;
-    this.datasets = /* @__PURE__ */ new Map();
-    this.createdAt = new Date();
-    this.env = "local";
-    this.lcache = null;
-  }
-  list() {
-    return Array.from(this.datasets.values());
-  }
-  remove(dataset) {
-    this.datasets.delete(dataset.source);
-  }
-  add(source, options) {
-    return __async(this, null, function* () {
-      if (options.destination === "") {
-        console.warn(`destination-not-provided: provide a destination for ${source}`);
-      }
-      const dataset = new _Dataset(source, options);
-      this.datasets.set(source, dataset);
-      return source;
-    });
-  }
-};
-function createWorkflow(name) {
-  return new Workflow(name);
+
+// bin/cli.js
+var usage = `
+Usage:
+  $muto [options]
+  
+  commands:
+    upload	uploads the specified file to S3
+
+  options:
+    -h, --help      output usage information 
+ -v, --version   output the version number
+    -v, --version  output the version number
+
+    -f --from       The path to the file to source from
+    -t --to         The path to the file to target to
+`;
+var args = arg({
+  "--help": Boolean,
+  "--version": Boolean,
+  "--from": String,
+  "--to": String,
+  "-h": "--help",
+  "-v": "--version",
+  "-f": "--from",
+  "-t": "--to"
+});
+if (args["--help"]) {
+  stdWrite(usage);
+  process.exit(0);
 }
-export {
-  createDataset,
-  createWorkflow
+if (args["--version"]) {
+  stdWrite(`v0.1.0`);
+  process.exit(0);
+}
+var commands = args["_"];
+if (Object.keys(args).length === 1) {
+  stdWrite(usage);
+  process.exit(0);
+}
+var operations = {
+  upload: "UPLOAD"
 };
-//# sourceMappingURL=muto.js.map
+void function run() {
+  return __async(this, null, function* () {
+    let input = {
+      from: "",
+      to: ""
+    };
+    if (args["--from"]) {
+      input.from = args["--from"];
+    }
+    if (args["--to"]) {
+      input.to = args["--to"];
+    }
+    if (commands.indexOf("upload") == -1) {
+      input.operation = operations.upload;
+    }
+    const d = createDataset(input.from, {
+      delimiter: ","
+    });
+    const confirmed = yield d.uploadToS3();
+    if (!confirmed) {
+      stdWrite("Upload cancelled");
+      process.exit(0);
+    }
+    console.log(confirmed);
+    stdWrite("Upload complete");
+    process.exit(0);
+  });
+}();
+function stdWrite(msg) {
+  typeof msg === "string" ? process.stdout.write(`${msg} 
+`) : process.stdout.write(`${JSON.stringify(msg, null, 2)}
+`);
+}
+process.on("unhandledRejection", (reason, promise) => {
+  stdWrite(reason);
+  process.exit(1);
+});
+//# sourceMappingURL=cli.js.map

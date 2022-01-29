@@ -8,6 +8,8 @@
   ],
   "compilerOptions": {
     "declaration": true,
+    "module": "es2020",
+    "moduleResolution": "Node",
     "baseUrl": ".",
     "declarationDir": "./dist/types",
     "emitDeclarationOnly": true

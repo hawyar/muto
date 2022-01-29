@@ -44,16 +44,18 @@ export interface Dataset {
     cached: boolean;
     state: datasetStateType;
     connector: connectorType | null;
+    setDestination(destination: string): void;
+    toJson(): Promise<string>;
+    getColumnHeader(): Promise<string[] | null>;
+    rowCount(): Promise<number>;
+    fileSize(): number;
+    preview(count: number, streamTo?: string): Promise<string[][] | string>;
     detectShape(): Promise<Shape>;
     determineSource(): string;
     determineSource(): string;
     determineConnector(): connectorType;
-    uploadToS3(): Promise<string>;
+    uploadToS3(bucket: string, key: string): Promise<string>;
     initMultipartUpload(bucket: string, key: string): Promise<string>;
-    toJson(): Promise<string>;
-    rowCount(): Promise<number>;
-    fileSize(): number;
-    preview(count: number, streamTo?: string): Promise<string[][] | string>;
 }
 export declare type DatasetOptions = {
     destination: string;

@@ -1,21 +1,20 @@
 #!/usr/bin/env node
-const arg = require("arg");
-const pkg = require("../package.json");
-const fs = require("fs/promises");
-const {createWorkflow} = require("../dist/index")
-const path = require("path");
+import arg from "arg"
+import {createDataset} from "../dist/muto.js"
 
 const usage = `
 Usage:
-  ${pkg.name} [options]
+  $muto [options]
   
   commands:
-  	upload	uploads the specified directory to S3
+    upload	uploads the specified file to S3
 
   options:
     -h, --help      output usage information \n -v, --version   output the version number
     -v, --version  output the version number
-    
+
+    -f --from       The path to the file to source from
+    -t --to         The path to the file to target to
 `;
 
 const args = arg({
@@ -37,12 +36,10 @@ if (args["--help"]) {
 }
 
 if (args["--version"]) {
-    stdWrite(`muto - v${pkg.version}`);
+    stdWrite(`v0.1.0`);
     process.exit(0);
 }
-
 const commands = args["_"];
-
 if (Object.keys(args).length === 1) {
     stdWrite(usage);
     process.exit(0);
@@ -53,87 +50,107 @@ const operations = {
 };
 
 void (async function run() {
-    let config = {
-        operation: "UPLOAD",
-        from: "",
-        to: "",
-    };
-
-    if (commands.indexOf("upload") !== -1) {
-        config.operation = operations.upload;
+    let input = {
+        from: '',
+        to: '',
+    }
+    if (args["--from"]) {
+        input.from = args["--from"];
     }
 
-    if (!args["--from"]) {
-        stdWrite(
-            `Error: no source given for operation, provide a valid source path \nExample: \n \t File system: ./my-datasets  \n \t AWS S3: s3://my-bucket/datasets/
-			`
-        );
-        process.exit(1);
+    if (args["--to"]) {
+        input.to = args["--to"];
     }
 
-    if (!args["--to"]) {
-        stdWrite(
-            `Error: no destination given for operation, provide a valid destination path \nExample: \n \t File system: ./my-datasets  \n \t AWS S3: s3://my-bucket/datasets/
-			`
-        );
-        process.exit(1);
+    if (commands.indexOf("upload") == -1) {
+        input.operation = operations.upload;
     }
 
-    config.from = args["--from"];
-    config.to = args["--to"];
+    const d = createDataset(input.from, {
+        delimiter: ",",
+    })
 
-    const w = createWorkflow("my_etl");
+    const confirmed = await d.uploadToS3()
 
-    // if fs and not dir throw before initializing engine
-
-    if (
-        config.from.startsWith("/") ||
-        config.from.startsWith("./") ||
-        config.from.startsWith("../")
-    ) {
-        const isDir = await fs
-            .stat(config.from)
-            .then((stat) => stat.isDirectory())
-            .catch((err) => {
-                stdWrite("Error: given source is not a valid directory");
-                process.exit(1);
-            });
-
-        if (!isDir) {
-            stdWrite(
-                "Error: unable to open source, please make sure source is a valid path"
-            );
-            process.exit(1);
-        }
-
-        stdWrite(`Created new worklow`);
-
-        const files = await fs
-            .readdir(config.from)
-            .then((files) => files)
-            .catch((err) => {
-                stdWrite(err);
-                process.exit(1);
-            });
-
-        for (const file of files) {
-            if (!file.endsWith(".csv")) return;
-            const src = "./" + path.normalize(path.join(config.from, file));
-
-            stdWrite(`Adding ${src} to workflow`);
-            const d1 = await w
-                .add(src, {
-                    delimiter: ",",
-                    quote: '"',
-                    header: true,
-                })
-                .catch((err) => {
-                    console.log(err);
-                });
-
-            console.log(d1);
-        }
+    if (!confirmed) {
+        stdWrite("Upload cancelled");
+        process.exit(0);
     }
+    console.log(confirmed);
+
+    stdWrite("Upload complete");
+    //
+    // if (!args["--from"]) {
+    //     stdWrite(
+    //         `Error: no source given for operation, provide a valid source path \nExample: \n \t File system: ./my-datasets  \n \t AWS S3: s3://my-bucket/datasets/
+    // 		`
+    //     );
+    //     process.exit(1);
+    // }
+    //
+    // if (!args["--to"]) {
+    //     stdWrite(
+    //         `Error: no destination given for operation, provide a valid destination path \nExample: \n \t File system: ./my-datasets  \n \t AWS S3: s3://my-bucket/datasets/
+    // 		`
+    //     );
+    //     process.exit(1);
+    // }
+    //
+    // config.from = args["--from"];
+    // config.to = args["--to"];
+    //
+    // const w = createWorkflow("my_etl");
+    //
+    // // if fs and not dir throw before initializing engine
+    //
+    // if (
+    //     config.from.startsWith("/") ||
+    //     config.from.startsWith("./") ||
+    //     config.from.startsWith("../")
+    // ) {
+    //     const isDir = await fs
+    //         .stat(config.from)
+    //         .then((stat) => stat.isDirectory())
+    //         .catch((err) => {
+    //             stdWrite("Error: given source is not a valid directory");
+    //             process.exit(1);
+    //         });
+    //
+    //     if (!isDir) {
+    //         stdWrite(
+    //             "Error: unable to open source, please make sure source is a valid path"
+    //         );
+    //         process.exit(1);
+    //     }
+    //
+    //     stdWrite(`Created new worklow`);
+    //
+    //     const files = await fs
+    //         .readdir(config.from)
+    //         .then((files) => files)
+    //         .catch((err) => {
+    //             stdWrite(err);
+    //             process.exit(1);
+    //         });
+    //
+    //     for (const file of files) {
+    //         if (!file.endsWith(".csv")) return;
+    //         const src = "./" + path.normalize(path.join(config.from, file));
+    //
+    //         stdWrite(`Adding ${src} to workflow`);
+    //         const d1 = await w
+    //             .add(src, {
+    //                 delimiter: ",",
+    //                 quote: '"',
+    //                 header: true,
+    //             })
+    //             .catch((err) => {
+    //                 console.log(err);
+    //             });
+    //
+    //         console.log(d1);
+    //     }
+    // }
 
     process.exit(0);
 })();
