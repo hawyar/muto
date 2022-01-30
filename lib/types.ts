@@ -82,6 +82,8 @@ export type DatasetOptions = {
     quotes: boolean,
     transform: (row: object) => object
     delimiter: Delimiters
+    keepColumns: Array<string>
+    sortBy: string
 }
 
 export interface Cache {

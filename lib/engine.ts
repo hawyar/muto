@@ -27,7 +27,6 @@ const credentials = (profile: string) => fromIni({
 });
 
 let s3: S3Client;
-let athena: AthenaClient
 
 /**
  * Creates a new S3 client if one already doesn't exist.
@@ -42,21 +41,22 @@ function s3Client(config: S3ClientConfig): S3Client {
     return s3;
 }
 
+
+let athena: AthenaClient
+
+
 /**
  * Creates a new athena client if one already doesn't exist.
  *  @param {AthenaClientConfig} config
  *  @returns {AthenaClient}
  */
 function athenaClient(config: AthenaClientConfig): AthenaClient {
-    if (!s3) {
+    if (!athena) {
         console.log('creating athena client')
         athena = new AthenaClient(config);
     }
     return athena;
 }
-
-// TODO: amke sure dataet is uploaded to s3,  prepare athena query, run athena query, create function query(``)
-
 
 /**
  * Parses S3 (s3://) style URIs
@@ -129,6 +129,7 @@ class _Dataset implements Dataset {
     addedAt: Date;
     options: DatasetOptions;
     shape: Shape
+    cut: string[]
     cached: boolean;
     state: datasetStateType
     connector: connectorType | null
@@ -154,6 +155,7 @@ class _Dataset implements Dataset {
             warnings: {},
             preview: [[]]
         }
+        this.cut = []
         this.addedAt = new Date();
         this.state = 'init'
         this.connector = null
@@ -209,6 +211,7 @@ class _Dataset implements Dataset {
 
         return r[0].count
     }
+
 
     /**
      * Extracts the header row from the dataset, defined columns

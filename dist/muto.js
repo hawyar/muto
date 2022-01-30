@@ -109,6 +109,7 @@ var _Dataset = class {
       warnings: {},
       preview: [[]]
     };
+    this.cut = [];
     this.addedAt = new Date();
     this.state = "init";
     this.connector = null;

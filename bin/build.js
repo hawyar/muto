@@ -6,45 +6,68 @@ import os from 'os';
 import download from 'download';
 
 (async function build() {
-    // get this from releases but for now pin to latest which is 6.0.0
+    // get this from releases but for now pin to latest v6
     const mlrSemver = '6.0.0';
     const mlr = "mlr@" + "v" + mlrSemver;
 
     const inBin = path.join(process.cwd(), 'node_modules', '.bin', mlr);
 
-    if (!fs.existsSync(inBin)) {
-        console.log("miller not found, downloading latest release");
 
-        const archMap = {
-            'x64': 'amd64',
-            'x86': '386'
-        };
+    const archMap = {
+        'x64': 'amd64',
+        'x86': '386'
+    };
 
-        const osMap = {
-            'darwin': 'darwin',
-            'linux': 'linux',
-            'win32': 'windows'
-        };
+    const osMap = {
+        'darwin': 'darwin',
+        'linux': 'linux',
+        'win32': 'windows'
+    };
 
-        await download(`https://github.com/johnkerl/miller/releases/download/v${mlrSemver}/miller_${mlrSemver}_${osMap[os.platform()]}_${archMap[os.arch()]}.tar.gz`, path.join(process.cwd(), mlr), {
-            extract: true,
-        }).catch(err => {
-            console.error(err);
-            process.exit(1);
-        });
 
-        console.log('Downloaded mlr@v' + mlrSemver);
+    if (os.platform() === 'win32') {
+        throw new Error('TODO: windows support');
+    }
 
+
+    if (fs.existsSync(inBin)) {
+        console.log(`skipped: ${mlr} already installed`);
+        return;
+    }
+
+    await download(`https://github.com/johnkerl/miller/releases/download/v${mlrSemver}/miller_${mlrSemver}_${osMap[os.platform()]}_${os.arch()}.tar.gz`, path.join(process.cwd(), mlr), {
+        extract: true,
+    }).catch(err => {
+        console.error(err);
+        process.exit(1);
+    }).finally(() => {
+        console.log('got mlr@v' + mlrSemver);
         fs.renameSync(path.join(process.cwd(), mlr, 'mlr'), inBin);
         fs.rmdirSync(path.join(process.cwd(), mlr), {
             recursive: true
         });
-        console.log("cleaning up")
-    } else {
-        console.log(mlr + " already downloaded");
-    }
+    });
 
-    await esbuild.build({
+    // using https://github.com/blastrain/vitess-sqlparser as a sql query parser
+    // we are using a wrapper https://github.com/hawyar/vitess-sqlparser so we can get the build
+    const sqlparserSemver = '0.1.4';
+    const sqlparser = "sqlparser@" + "v" + sqlparserSemver;
+
+    await download(`https://github.com/hawyar/vitess-sqlparser/releases/download/v${sqlparserSemver}/sqlparser-v${sqlparserSemver}-${osMap[os.platform()]}-${os.arch()}.tar.gz`, path.join(process.cwd(), sqlparser), {
+        extract: true,
+    }).catch(err => {
+        console.error(err);
+        process.exit(1);
+    }).finally(() => {
+            console.log('got sqlparser@' + sqlparserSemver);
+            fs.renameSync(path.join(process.cwd(), sqlparser, 'sqlparser'), path.join(process.cwd(), 'node_modules', '.bin', sqlparser));
+            fs.rmdirSync(path.join(process.cwd(), sqlparser), {
+                recursive: true
+            });
+        }
+    );
+
+    const mutoBuild = await esbuild.build({
         entryPoints: [path.join(process.cwd(), "lib/index.ts")],
         bundle: true,
         minify: false,
@@ -61,8 +84,7 @@ import download from 'download';
         console.log('built muto');
     });
 
-
-    await esbuild.build({
+    const cliBuild = await esbuild.build({
         entryPoints: [path.join(process.cwd(), "bin/cli.js")],
         bundle: true,
         minify: false,
@@ -78,5 +100,7 @@ import download from 'download';
     }).finally(() => {
         console.log("built cli");
     });
+
+    await Promise.all([mutoBuild, cliBuild])
 })();
 
