@@ -10,8 +10,7 @@
     "prepare": "npm run build",
     "build": "node bin/build.js && tsc",
     "dev": "npm run build && npm run test",
-    "test": "tap --no-coverage --reporter=specy -J",
-    "docs": "jsdoc ./dist/lib/engine.js -d docs -r -e utf8 --readme README.md -c conf.json"
+    "test": "tap --no-coverage --reporter=specy -J"
   },
   "exports": "./dist/muto.js",
   "author": "hawyar",
@@ -25,14 +24,12 @@
     "@typescript-eslint/eslint-plugin": "^5.9.1",
     "@typescript-eslint/parser": "^5.9.1",
     "download": "^8.0.0",
-    "esbuild": "^0.14.11",
+    "esbuild": "^0.14.14",
     "esbuild-node-externals": "^1.4.1",
     "eslint": "^7.32.0",
     "finalhandler": "^1.1.2",
     "got": "^12.0.1",
     "husky": "^7.0.0",
-    "jsdoc": "^3.6.7",
-    "serve-static": "^1.14.2",
     "tap": "^15.1.6",
     "typescript": "^4.5.4"
   },

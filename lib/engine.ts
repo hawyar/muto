@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import {readFileSync, writeFileSync} from 'atomically';
 import {CreateMultipartUploadCommand, PutObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3";
 import {fromIni} from "@aws-sdk/credential-providers";
 import {AthenaClient, AthenaClientConfig} from "@aws-sdk/client-athena";
@@ -8,139 +7,38 @@ import os from "os";
 import path from "path";
 import {createInterface} from "readline";
 import {
-    Cache,
     connectorType,
     Dataset,
     DatasetOptions,
     datasetStateType,
     env,
-    mlrCmd,
+    loaderType,
+    mlr,
     ProcessResult,
-    Shape
+    Shape,
+    sqlparser,
+    Workflow,
 } from "./types"
 
-const credentials = (profile: string) => fromIni({
-    profile: profile,
-    mfaCodeProvider: async (mfaSerial) => {
-        return mfaSerial
-    },
-});
-
-let s3: S3Client;
-
-/**
- * Creates a new S3 client if one already doesn't exist.
- *  @param {S3ClientConfig} config
- *  @returns {S3Client}
- */
-function s3Client(config: S3ClientConfig): S3Client {
-    if (!s3) {
-        console.log('creating s3 client')
-        s3 = new S3Client(config);
-    }
-    return s3;
-}
-
-
-let athena: AthenaClient
-
-
-/**
- * Creates a new athena client if one already doesn't exist.
- *  @param {AthenaClientConfig} config
- *  @returns {AthenaClient}
- */
-function athenaClient(config: AthenaClientConfig): AthenaClient {
-    if (!athena) {
-        console.log('creating athena client')
-        athena = new AthenaClient(config);
-    }
-    return athena;
-}
-
-/**
- * Parses S3 (s3://) style URIs
- */
-function parseS3Uri(
-    uri: string,
-    options: {
-        file: boolean;
-    }
-): {
-    data: {
-        bucket: string;
-        key: string;
-        file: string;
-    };
-    err: string;
-} {
-    const opt = {
-        file: options && options.file ? options.file : false,
-    };
-
-    if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
-        throw new Error(`invalid-s3-uri: ${uri}`);
-    }
-
-    let err = "";
-
-    const result = {
-        bucket: "",
-        key: "",
-        file: "",
-    };
-
-    const src = uri.split(":/")[1];
-    const [bucket, ...keys] = src.split("/").splice(1);
-
-    result.bucket = bucket;
-    result.key = keys.join("/");
-
-    keys.forEach((k, i) => {
-        if (i === keys.length - 1) {
-            const last = k.split(".").length;
-            if (opt.file && last === 1) err = `uri should be a given, given: ${uri}`;
-
-            if (!opt.file && last === 1) return;
-
-            if (!opt.file && last > 1) {
-                err = `Invalid S3 uri, ${uri} should not end with a file name`;
-                return;
-            }
-
-            if (!opt.file && k.split(".")[1] !== "" && last > 1)
-                err = `${uri} should not be a file endpoint: ${k}`;
-
-            if (last > 1 && k.split(".")[1] !== "") result.file = k;
-        }
-    });
-    return {
-        data: result,
-        err: err,
-    };
-}
-
-/**
- * Dataset represent a file for processing
- */
 class _Dataset implements Dataset {
+    name: string
     source: string;
     destination: string;
     addedAt: Date;
     options: DatasetOptions;
     shape: Shape
-    cut: string[]
-    cached: boolean;
+    env: env;
     state: datasetStateType
     connector: connectorType | null
-    env: string
+    loader: loaderType | null
+    pcount: number
 
     constructor(source: string, options: DatasetOptions) {
+        this.name = options && options.name ? options.name : path.basename(source);
         this.source = source;
-        this.cached = false;
         this.destination = options.destination
-        this.options = options;
-        this.env = this.determineSource();
+        this.options = options
+        this.env = this.determineEnv()
         this.shape = {
             type: "",
             columns: [],
@@ -153,45 +51,34 @@ class _Dataset implements Dataset {
             delimiter: "",
             errors: {},
             warnings: {},
-            preview: [[]]
+            preview: []
         }
-        this.cut = []
         this.addedAt = new Date();
         this.state = 'init'
         this.connector = null
+        this.loader = null
+        this.pcount = 0
     }
 
-    setDestination(destination: string) {
-        this.destination = destination
+    async toJson(): Promise<ChildProcessWithoutNullStreams> {
+        const json = this.exec(mlr, ["--icsv", "--ojson", "clean-whitespace", this.source])
+        if (!json.stdout) {
+            throw new Error(`failed to convert ${this.source} from CSV to JSON`)
+        }
+        return json
     }
 
-    /**
-     * Convert CSV to JSON
-     * @return {Promise<string>} source of the dataset
-     */
-    async toJson(): Promise<string> {
-        const write = fs.createWriteStream(this.destination)
-
-        const json = this.exec(mlrCmd, ["--icsv", "--ojson", "clean-whitespace", "cat", this.source])
-        json.stdout.pipe(write)
-
-        write.on('close', () => {
-            console.log("📝 Dataset converted to JSON")
-            return this.destination
-        })
-
-        write.on('error', (err) => {
-            throw new Error(err.message)
-        })
-        return this.destination
+    async toCSV(): Promise<ChildProcessWithoutNullStreams> {
+        const json = this.exec(mlr, ["--icsv", "--ocsv", "cat", this.source])
+        if (!json.stdout) {
+            throw new Error(`failed to convert ${this.source} from JSON to CSV`)
+        }
+        return json
     }
 
-    /**
-     * Count number of rows
-     * @return {Promise<string>} number of rows
-     */
+
     async rowCount(): Promise<number> {
-        const count = await this.exec(mlrCmd, [`--ojson`, `count`, this.source])
+        const count = await this.exec(mlr, [`--ojson`, `count`, this.source])
 
         const rowCountExec = await this.promisifyProcessResult(count)
 
@@ -213,12 +100,8 @@ class _Dataset implements Dataset {
     }
 
 
-    /**
-     * Extracts the header row from the dataset, defined columns
-     * @return Promise<string[] | null> header row or null if no header
-     */
     async getColumnHeader(): Promise<string[] | null> {
-        const res = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
+        const res = await this.exec(mlr, [`--icsv`, `--ojson`, `head`, `-n`, `1`, this.source])
 
         const colExec = await this.promisifyProcessResult(res)
 
@@ -243,7 +126,7 @@ class _Dataset implements Dataset {
 
     async formatValues() {
         // --opprint format-values
-        const res = await this.exec(mlrCmd, [`--icsv`, `format-values`, this.source])
+        const res = await this.exec(mlr, [`--icsv`, `format-values`, this.source])
         const formatVal = await this.promisifyProcessResult(res)
 
         if (formatVal.code !== 0) {
@@ -257,13 +140,7 @@ class _Dataset implements Dataset {
         return this.shape.columns
     }
 
-    /**
-     * Extracts rows from the dataset for preview.
-     * If the dataset is too large to preview then it will stream the result and return the file path
-     * @param {number} count - number of rows to preview
-     * @param {string} streamTo - path to the file to stream to
-     * @return Promise<string[][] | string> - preview rows or path to the file the preview was streamed to
-     */
+
     async preview(count = 20, streamTo?: string): Promise<string[][] | string> {
         let write: fs.WriteStream
 
@@ -277,7 +154,7 @@ class _Dataset implements Dataset {
             if (streamTo === undefined) throw new Error('stream-destination-undefined')
             write = fs.createWriteStream(streamTo)
 
-            const previewExec = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+            const previewExec = await this.exec(mlr, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
 
             previewExec.stdout.pipe(write)
 
@@ -285,7 +162,7 @@ class _Dataset implements Dataset {
             return streamTo
         }
 
-        const previewExec = await this.exec(mlrCmd, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
+        const previewExec = await this.exec(mlr, [`--icsv`, `--ojson`, `head`, `-n`, count.toString(), this.source])
 
         const prev = await this.promisifyProcessResult(previewExec)
 
@@ -351,7 +228,7 @@ class _Dataset implements Dataset {
             throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
         }
 
-        const mimeType = mimeRes.stdout.trim()
+        shape.type = mimeRes.stdout.trim()
 
         const readLine = createInterface({
             input: fs.createReadStream(path),
@@ -431,24 +308,42 @@ class _Dataset implements Dataset {
         return shape;
     }
 
-    determineConnector(): connectorType {
-        const env = this.determineSource();
-        if (env === "local") {
-            const stream = fs.createReadStream(this.source);
-            return stream
-        }
-
-        if (env === "aws") {
-            const client = s3Client({
+    determineLoader(): void {
+        if (this.destination.startsWith("s3://")) {
+            this.loader = s3Client({
                 credentials: credentials("default"),
                 region: "us-east-2",
             });
-            return client
+            return;
+        }
+
+        if (
+            this.source.startsWith("/") ||
+            this.source.startsWith("../") ||
+            this.source.startsWith("./")
+        ) {
+            this.loader = fs.createReadStream(this.source);
+            return;
+        }
+    }
+
+    determineConnector(): void {
+        if (this.env === "local") {
+            this.connector = fs.createReadStream(this.source);
+            return;
+        }
+
+        if (this.env === "aws") {
+            this.connector = s3Client({
+                credentials: credentials("default"),
+                region: "us-east-2",
+            });
+            return;
         }
         throw new Error(`unsupported-source for: ${this.source}`)
     }
 
-    determineSource(): string {
+    determineEnv(): env {
         if (
             this.source.startsWith("/") ||
             this.source.startsWith("../") ||
@@ -458,7 +353,7 @@ class _Dataset implements Dataset {
         }
 
         if (this.source.startsWith("s3://")) {
-            return "remote";
+            return "aws";
         }
 
         throw new Error(`invalid-source-type: ${this.source}`);
@@ -525,6 +420,7 @@ class _Dataset implements Dataset {
         }).finally(() => {
             fStream.close()
         })
+
         if (res.$metadata.httpStatusCode !== 200) {
             throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
         }
@@ -533,11 +429,6 @@ class _Dataset implements Dataset {
         return res.$metadata.requestId
     }
 
-    /**
-     * Initiates a multipart upload and returns an upload ID
-     * @returns {string} uploadID
-     * @private
-     */
     async initMultipartUpload(
         bucket: string,
         key: string
@@ -570,7 +461,13 @@ class _Dataset implements Dataset {
 
     exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams {
         console.log(`exec: ${cmd} ${args.join(' ')}`)
-        return spawn(cmd, args)
+
+        if (this.pcount > 5) {
+            throw new Error(`too-many-processes: ${this.pcount}`)
+        }
+
+        this.pcount++
+        return spawn(cmd, args, {})
     }
 
     promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult> {
@@ -601,115 +498,59 @@ class _Dataset implements Dataset {
     }
 }
 
-/**
- * Returns a new dataset
- * @param {string} source - Source of the dataset
- * @returns {Options} options - Options for the dataset
- */
-export function createDataset(source: string, options: DatasetOptions): Dataset {
-    const d = new _Dataset(source, options);
-    Promise.all([d.detectShape(), d.determineSource(), d.determineConnector()]).then((val) => {
-        // console.log(val)
-    }).catch((err) => {
-        throw new Error(err)
-    })
-    return d;
+export function createDataset(source: string, opt: DatasetOptions): Dataset {
+    return new _Dataset(source, opt);
 }
 
-const cache = (function (): { getInstance: () => Cache } {
-    let cache: Cache;
-
-    function init() {
-        const cachePath = path.join(process.cwd(), '.muto-cache')
-
-        if (!fs.existsSync(cachePath)) {
-            console.log('creating cache file at', cachePath)
-            writeFileSync(cachePath, JSON.stringify({}))
-        } else {
-            console.log('loading cache from', cachePath)
-        }
-
-        return {
-            init: new Date(),
-            path: cachePath,
-            get: (key: string): Dataset | undefined => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-
-                if (cache[key].source !== key) {
-                    return undefined
-                }
-                return cache[key]
-            },
-            set: (key: string, value: Dataset): string | void => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-
-                if (cache[key]) {
-                    return
-                }
-
-                cache[key] = value
-                writeFileSync(cachePath, JSON.stringify(cache))
-                return key
-            },
-            has: (key: string): boolean => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-
-                if (cache[key]) {
-                    return true
-                }
-                return false
-            },
-            delete: (key: string) => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-
-                delete cache[key]
-
-                writeFileSync(cachePath, JSON.stringify(cache))
-            },
-            clear: () => {
-                writeFileSync(cachePath, JSON.stringify({}))
-            },
-            size: () => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-                return Object.keys(cache).length
-            },
-            keys: () => {
-                const file = readFileSync(cachePath)
-                const cache = JSON.parse(file.toString())
-                return Object.keys(cache)
-            }
-        }
+function parseQuery(query: string): Promise<any> {
+    const qq = {
+        query: query,
+        select: [],
+        from: [],
+        where: [],
+        orderBy: [],
+        groupBy: [],
+        limit: null,
+        offset: null,
     }
 
-    return {
-        getInstance: () => {
-            if (!cache) {
-                cache = init()
-            }
-            return cache
-        }
-    }
-})()
+    const child = spawn(sqlparser, [qq.query])
 
-class Workflow {
+    return new Promise((resolve, reject) => {
+        child.on('error', (err) => {
+            reject(err)
+        })
+
+        child.on('close', (code) => {
+            if (code !== 0) {
+                reject(`failed-sqlparser: Error while parsing query: ${code}`)
+            }
+        })
+
+        child.stdout.on('data', (data) => {
+            const parsed = JSON.parse(data.toString())
+            if (parsed.error) {
+                reject(`failed-sqlparser: Error while parsing query: ${parsed.error}`)
+            }
+            resolve(parsed)
+        })
+
+    })
+}
+
+class _Workflow implements Workflow {
     name: string;
     datasets: Map<string, Dataset>;
     readonly createdAt: Date;
     env: env;
-    lcache: Cache | null
+    queryy: string;
 
     constructor(name: string) {
         this.name = name;
         this.datasets = new Map();
         this.createdAt = new Date();
         this.env = 'local';
-        this.lcache = null;
-        // this.lcache = cache.getInstance()
+        this.queryy = '';
     }
 
     list(): Dataset[] {
@@ -720,27 +561,125 @@ class Workflow {
         this.datasets.delete(dataset.source);
     }
 
-    async add(source: string, options: DatasetOptions): Promise<string> {
-        if (options.destination === "") {
-            console.warn(`destination-not-provided: provide a destination for ${source}`);
-        }
+    get(source: string): Dataset | null {
+        return this.datasets.get(source) || null;
+    }
 
-        // if (this.lcache.has(source)) {
-        //     return source
-        // }
-        const dataset = new _Dataset(source, options);
+    add(d: Dataset): Promise<string> {
+        return new Promise((resolve, reject) => {
+            if (this.datasets.has(d.source)) {
+                reject(`failed-add-dataset: Dataset with source ${d.source} already exists`)
+            }
+            Promise.all([d.determineConnector(), d.determineLoader()]).catch(err => {
+                throw new Error(err)
+            }).then(() => {
+                this.datasets.set(d.source, d);
+                resolve(d.source);
+            }).catch(err => {
+                reject(err)
+            })
+        })
+    }
 
-        this.datasets.set(source, dataset);
-        return source
+    query(q: string): Promise<string> {
+        parseQuery(q).then(parsed => {
+            this.queryy = q;
+            console.log(parsed)
+        }).catch(err => {
+            throw new Error(err)
+        })
+        return new Promise((resolve, reject) => {
+            resolve("ok")
+        })
     }
 }
 
-
-/**
- * Returns a new workflow
- * @param {string} name - Name of the workflow
- * @returns {Workflow} - New workflow
- */
 export function createWorkflow(name: string): Workflow {
-    return new Workflow(name);
+    return new _Workflow(name);
+}
+
+const credentials = (profile: string) => fromIni({
+    profile: profile,
+    mfaCodeProvider: async (mfaSerial) => {
+        return mfaSerial
+    },
+});
+
+let s3: S3Client;
+
+function s3Client(config: S3ClientConfig): S3Client {
+    if (!s3) {
+        console.log('creating s3 client')
+        s3 = new S3Client(config);
+    }
+    return s3;
+}
+
+let athena: AthenaClient
+
+function athenaClient(config: AthenaClientConfig): AthenaClient {
+    if (!athena) {
+        console.log('creating athena client')
+        athena = new AthenaClient(config);
+    }
+    return athena;
+}
+
+
+function parseS3Uri(
+    uri: string,
+    options: {
+        file: boolean;
+    }
+): {
+    data: {
+        bucket: string;
+        key: string;
+        file: string;
+    };
+    err: string;
+} {
+    const opt = {
+        file: options && options.file ? options.file : false,
+    };
+
+    if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
+        throw new Error(`invalid-s3-uri: ${uri}`);
+    }
+
+    let err = "";
+    const result = {
+        bucket: "",
+        key: "",
+        file: "",
+    };
+
+    const src = uri.split(":/")[1];
+    const [bucket, ...keys] = src.split("/").splice(1);
+
+    result.bucket = bucket;
+    result.key = keys.join("/");
+
+    keys.forEach((k, i) => {
+        if (i === keys.length - 1) {
+            const last = k.split(".").length;
+            if (opt.file && last === 1) err = `uri should be a given, given: ${uri}`;
+
+            if (!opt.file && last === 1) return;
+
+            if (!opt.file && last > 1) {
+                err = `Invalid S3 uri, ${uri} should not end with a file name`;
+                return;
+            }
+
+            if (!opt.file && k.split(".")[1] !== "" && last > 1)
+                err = `${uri} should not be a file endpoint: ${k}`;
+
+            if (last > 1 && k.split(".")[1] !== "") result.file = k;
+        }
+    });
+    return {
+        data: result,
+        err: err,
+    };
 }

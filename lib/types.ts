@@ -1,28 +1,28 @@
 import {S3Client} from "@aws-sdk/client-s3";
 import {join} from "path";
 import fs from "fs";
+import {ChildProcessWithoutNullStreams,} from "child_process";
 
-export enum Delimiters {
+export enum Delimiter {
     COMMA = ",",
-    SEMICOLON = ";",
-    PIPE = "|",
-    COLON = ":",
     TAB = "\t",
     SPACE = " ",
-    TILDE = "~",
-    DASH = "-",
-    UNDERSCORE = "_"
+    PIPE = "|",
+    SEMICOLON = ";",
+    COLON = ":",
+    NONE = "",
 }
+
+export const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
+export const sqlparser = join(process.cwd(), 'node_modules', '.bin', "sqlparser@v0.1.4")
 
 export type env = 'local' | 'aws'
 export type connectorType = S3Client | fs.ReadStream
-export const mlrCmd = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
-
+export type loaderType = S3Client | fs.ReadStream
 
 // TODO: better error message for errors in transform
 export type datasetStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
-export type ShapeErrType = 'unrecognizedDelimiter' | 'noHeader' | 'invalidFileType' | 'rowWidthMismatch'
-
+// type ShapeErrType = 'unrecognizedDelimiter' | 'noHeader' | 'invalidFileType' | 'rowWidthMismatch'
 
 export type Shape = {
     type: string,
@@ -38,6 +38,15 @@ export type Shape = {
     warnings: { [key: string]: string },
     preview: string[][],
 }
+export type DatasetOptions = {
+    name: string,
+    destination: string;
+    columns: Array<string>,
+    header: boolean,
+    quotes: boolean,
+    output: 'csv' | 'json'
+    delimiter: Delimiter
+}
 
 export interface Dataset {
     source: string
@@ -45,13 +54,20 @@ export interface Dataset {
     addedAt: Date;
     options: DatasetOptions;
     shape: Shape
-    cached: boolean
     state: datasetStateType
     connector: connectorType | null
+    loader: loaderType | null
 
-    setDestination(destination: string): void
 
-    toJson(): Promise<string>
+    toJson(): Promise<ChildProcessWithoutNullStreams>
+
+    toCSV(): Promise<ChildProcessWithoutNullStreams>
+
+    determineEnv(): env
+
+    determineConnector(): void
+
+    determineLoader(): void
 
     getColumnHeader(): Promise<string[] | null>
 
@@ -63,46 +79,29 @@ export interface Dataset {
 
     detectShape(): Promise<Shape>
 
-    determineSource(): string
-
-    determineSource(): string
-
-    determineConnector(): connectorType
-
     uploadToS3(bucket: string, key: string): Promise<string>
 
     initMultipartUpload(bucket: string, key: string): Promise<string>
 
 }
 
-export type DatasetOptions = {
-    destination: string;
-    columns: Array<string>,
-    header: boolean,
-    quotes: boolean,
-    transform: (row: object) => object
-    delimiter: Delimiters
-    keepColumns: Array<string>
-    sortBy: string
-}
 
-export interface Cache {
-    path: string
-    init: Date
+export interface Workflow {
+    name: string
+    createdAt: Date
+    datasets: Map<string, Dataset>
+    env: env
+    queryy: string
 
-    get(key: string): Dataset | undefined
+    add(dataset: Dataset): Promise<string>
 
-    set(key: string, value: Dataset): void
+    query(q: string): Promise<string>
 
-    has(key: string): boolean
+    remove(dataset: Dataset): void
 
-    delete(key: string): void
+    get(name: string): Dataset | null
 
-    clear(): void
-
-    size(): number
-
-    keys(): string[]
+    list(): Array<Dataset>
 }
 
 export type ProcessResult = {
