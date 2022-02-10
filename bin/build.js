@@ -73,7 +73,7 @@ import download from 'download';
     const mutoBuild = await esbuild.build({
         entryPoints: [path.join(process.cwd(), "lib/index.ts")],
         bundle: true,
-        minify: true,
+        // minify: true,
         sourcemap: true,
         target: 'es6',
         platform: 'node',

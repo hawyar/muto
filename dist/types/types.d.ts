@@ -44,10 +44,10 @@ export declare type DatasetOptions = {
     output: 'csv' | 'json';
     delimiter: Delimiter;
 };
-export interface Dataset {
+export interface Catalog {
     source: string;
     destination: string;
-    addedAt: Date;
+    init: Date;
     options: DatasetOptions;
     shape: Shape;
     state: datasetStateType;
@@ -69,14 +69,14 @@ export interface Dataset {
 export interface Workflow {
     name: string;
     createdAt: Date;
-    datasets: Map<string, Dataset>;
+    catalogs: Map<string, Catalog>;
     env: env;
-    queryy: string;
-    add(dataset: Dataset): Promise<string>;
+    qquery: string;
+    add(dataset: Catalog): Promise<string>;
     query(q: string): Promise<string>;
-    remove(dataset: Dataset): void;
-    get(name: string): Dataset | null;
-    list(): Array<Dataset>;
+    remove(dataset: Catalog): void;
+    get(name: string): Catalog | null;
+    list(): Array<Catalog>;
 }
 export declare type ProcessResult = {
     stdout: string;

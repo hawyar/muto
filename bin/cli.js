@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import arg from "arg"
-import {createDataset} from "../dist/muto.js"
+import {createCatalog} from "../dist/muto.js";
 
 const usage = `
 Usage:
@@ -66,19 +66,13 @@ void (async function run() {
         input.operation = operations.upload;
     }
 
-    const d = createDataset(input.from, {
-        delimiter: ",",
+
+    const dataset = await createCatalog(input.from, {
+        name: "albums",
+        destination: "s3://hwyr-cms/testme/albums.csv",
+        output: "json",
     })
 
-    const confirmed = await d.uploadToS3()
-
-    if (!confirmed) {
-        stdWrite("Upload cancelled");
-        process.exit(0);
-    }
-    console.log(confirmed);
-
-    stdWrite("Upload complete");
     //
     // if (!args["--from"]) {
     //     stdWrite(
