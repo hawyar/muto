@@ -1,19 +1,13 @@
 import fs from "fs"
-import {
-    CreateMultipartUploadCommand,
-    PutObjectCommand,
-    S3Client,
-    S3ClientConfig
-} from "@aws-sdk/client-s3"
-import { fromIni } from "@aws-sdk/credential-providers"
-import { AthenaClient, AthenaClientConfig } from "@aws-sdk/client-athena"
-import { ChildProcessWithoutNullStreams, spawn } from "child_process"
+import {ChildProcessWithoutNullStreams, spawn} from "child_process"
 import os from "os"
-import path, { join } from "path"
-import { VFile } from "vfile"
-import { createInterface } from "readline"
+import path, {join} from "path"
+import {VFile} from "vfile"
+import {createInterface} from "readline"
+import {CreateMultipartUploadCommand, PutObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3"
+import {fromIni} from "@aws-sdk/credential-providers"
 
-export enum Delimiter {
+enum Delimiter {
     COMMA = ",",
     TAB = "\t",
     SPACE = " ",
@@ -22,20 +16,14 @@ export enum Delimiter {
     COLON = ":"
 }
 
-export const mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0")
-export const sqlparser = join(
-    process.cwd(),
-    "node_modules",
-    ".bin",
-    "sqlparser@v0.1.4"
-)
+const mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0")
 
-export type env = "local" | "aws"
-export type connectorType = S3Client | fs.ReadStream
-export type loaderType = S3Client | fs.ReadStream
+type env = "local" | "aws"
+type connectorType = S3Client | fs.ReadStream
+type loaderType = S3Client | fs.ReadStream
 
-// TODO: better error message for errors in transform
-export type datasetStateType =
+// TODO: better error message for warning and errors in transform
+type catalogStateType =
     | "init"
     | "transforming"
     | "uploading"
@@ -43,13 +31,13 @@ export type datasetStateType =
     | "uploaded"
     | "ready"
 
-export type ProcessResult = {
+type ProcessResult = {
     stdout: string
     stderr: string
     code: number
 }
 
-export type Shape = {
+type Shape = {
     type: string
     columns: Array<string>
     header: boolean
@@ -63,7 +51,8 @@ export type Shape = {
     warnings: { [key: string]: string }
     preview: string[][]
 }
-export type DatasetOptions = {
+
+type CatalogOptions = {
     name: string
     destination: string
     columns: Array<string>
@@ -73,18 +62,117 @@ export type DatasetOptions = {
     delimiter: Delimiter
 }
 
+const sqlparser = join(
+    process.cwd(),
+    "node_modules",
+    ".bin",
+    "sqlparser@v0.1.4"
+)
+
+type ParsedStatement = {
+    Cache?: string
+    Comments?: string
+    Distinct?: string
+    Hints?: string
+    SelectExprs?: []
+    From?: []
+    Where?: string
+    GroupBy?: null
+    Having?: null
+    OrderBy?: []
+    Limit?: null
+    Lock?: ""
+}
+
+const credentials = (profile: string) =>
+    fromIni({
+        profile: profile,
+        mfaCodeProvider: async (mfaSerial) => {
+            return mfaSerial
+        }
+    })
+
+let s3: S3Client
+
+function s3Client(config: S3ClientConfig): S3Client {
+    if (!s3) {
+        console.log("setting up s3 client")
+        s3 = new S3Client(config)
+    }
+    return s3
+}
+
+function parseS3Uri(
+    uri: string,
+    options: {
+        file: boolean
+    }
+): {
+    data: {
+        bucket: string
+        key: string
+        file: string
+    }
+    err: string
+} {
+    const opt = {
+        file: options && options.file ? options.file : false
+    }
+
+    if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
+        throw new Error(`invalid-s3-uri: ${uri}`)
+    }
+
+    let err = ""
+    const result = {
+        bucket: "",
+        key: "",
+        file: ""
+    }
+
+    const src = uri.split(":/")[1]
+    const [bucket, ...keys] = src.split("/").splice(1)
+
+    result.bucket = bucket
+    result.key = keys.join("/")
+
+    keys.forEach((k, i) => {
+        if (i === keys.length - 1) {
+            const last = k.split(".").length
+            if (opt.file && last === 1)
+                err = `uri should be a given, given: ${uri}`
+
+            if (!opt.file && last === 1) return
+
+            if (!opt.file && last > 1) {
+                err = `Invalid S3 uri, ${uri} should not end with a file name`
+                return
+            }
+
+            if (!opt.file && k.split(".")[1] !== "" && last > 1)
+                err = `${uri} should not be a file endpoint: ${k}`
+
+            if (last > 1 && k.split(".")[1] !== "") result.file = k
+        }
+    })
+    return {
+        data: result,
+        err: err
+    }
+}
+
 class Catalog {
     name: string
     source: string
-    options: DatasetOptions
+    options: CatalogOptions
     destination: string
     init: Date
     env: env
-    state: datasetStateType
+    state: catalogStateType
     vfile: VFile
     pcount: number
 
-    constructor(source: string, options: DatasetOptions) {
+    constructor(source: string, options: CatalogOptions) {
         this.name =
             options && options.name ? options.name : path.basename(source)
         this.source = source
@@ -94,7 +182,7 @@ class Catalog {
         this.init = new Date()
         this.state = "init"
         this.pcount = 0
-        this.vfile = new VFile({ path: this.source })
+        this.vfile = new VFile({path: this.source})
     }
 
     async toJson(): Promise<ChildProcessWithoutNullStreams> {
@@ -231,7 +319,7 @@ class Catalog {
         const shape: Shape = {
             type: "",
             size: 0,
-            columns: [""],
+            columns: [],
             header: false,
             encoding: "utf-8",
             bom: false,
@@ -240,7 +328,7 @@ class Catalog {
             delimiter: ",",
             errors: {},
             warnings: {},
-            preview: [[""]]
+            preview: []
         }
 
         if (!fs.existsSync(path)) {
@@ -249,10 +337,9 @@ class Catalog {
             )
         }
 
-        const stat = fs.statSync(path)
-        shape.size = stat.size
+        shape.size = fs.statSync(path).size
 
-        if (stat.size > 1024 * 1024 * 1024) {
+        if (shape.size > 1024 * 1024 * 1024) {
             throw new Error(
                 `file-size-exceeds-limit: ${path} is too large, please limit to under 1GB for now`
             )
@@ -265,7 +352,7 @@ class Catalog {
         }
 
         if (os.platform() === "win32") {
-            // TODO: handle
+            // todo: handle
             throw new Error(`scream`)
         }
 
@@ -281,7 +368,7 @@ class Catalog {
             throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
         }
 
-        shape.type = mimeRes.stdout.trim()
+        shape.type = mimeRes.stdout.split(":")[1].trim()
 
         const readLine = createInterface({
             input: fs.createReadStream(path),
@@ -296,7 +383,6 @@ class Catalog {
             del: ""
         }
 
-        // hold the previous line while rl proceeds to next line using \r\n as a delimiter
         let previous = ""
 
         const delimiters = [",", ";", "\t", "|", ":", " ", "|"]
@@ -313,12 +399,15 @@ class Catalog {
                 if (first.del === "" || first.row.length <= 1) {
                     shape.errors[
                         "unrecognizedDelimiter"
-                    ] = `${path} does not have a recognized delimiter`
+                        ] = `${path} does not have a recognized delimiter`
                     shape.header = false
                 }
                 const isDigit = /\d+/
 
-                // const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
+                const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
+
+
+                console.log(hasDigitInHeader)
                 // if (hasDigitInHeader) {
                 //     shape.header = false;
                 //     shape.warnings["noHeader"] = `no header found`;
@@ -469,7 +558,7 @@ class Catalog {
             console.warn(`file size ${fSize} is larger than 100MB`)
         }
 
-        const { data: uri, err } = parseS3Uri(this.destination, {
+        const {data: uri, err} = parseS3Uri(this.destination, {
             file: true
         })
 
@@ -481,7 +570,7 @@ class Catalog {
             uri.file = path.basename(this.source)
             console.warn(
                 "Destination filename not provided. Using source source basename" +
-                    uri.file
+                uri.file
             )
         }
 
@@ -594,7 +683,7 @@ class Catalog {
 
 export async function createCatalog(
     source: string,
-    opt: DatasetOptions
+    opt: CatalogOptions
 ): Promise<Catalog> {
     return new Promise((resolve, reject) => {
         if (!source) {
@@ -631,56 +720,19 @@ export async function createCatalog(
     })
 }
 
-function parseQuery(query: string): Promise<any> {
-    const qq = {
-        query: query,
-        select: [],
-        from: [],
-        where: [],
-        orderBy: [],
-        groupBy: [],
-        limit: null,
-        offset: null
-    }
-
-    const child = spawn(sqlparser, [qq.query])
-
-    return new Promise((resolve, reject) => {
-        child.on("error", (err) => {
-            reject(err)
-        })
-
-        child.on("close", (code) => {
-            if (code !== 0) {
-                reject(`failed-sqlparser: Error while parsing query: ${code}`)
-            }
-        })
-
-        child.stdout.on("data", (data) => {
-            const parsed = JSON.parse(data.toString())
-            if (parsed.error) {
-                reject(
-                    `failed-sqlparser: Error while parsing query: ${parsed.error}`
-                )
-            }
-            resolve(parsed)
-        })
-    })
-}
-
 class Workflow {
     name: string
     catalogs: Map<string, Catalog>
     readonly createdAt: Date
     env: env
-    qquery: string
+    stmt: string // sql statement
 
     constructor(name: string) {
         this.name = name
         this.catalogs = new Map()
         this.createdAt = new Date()
         this.env = "local"
-        this.qquery = ""
+        this.stmt = ""
     }
 
     list(): Catalog[] {
@@ -695,129 +747,55 @@ class Workflow {
         return this.catalogs.get(source) || null
     }
 
-    add(d: Catalog): Promise<string> {
-        return new Promise((resolve, reject) => {
-            if (this.catalogs.has(d.source)) {
-                reject(
-                    `failed-add-dataset: Dataset with source ${d.source} already exists`
-                )
-            }
-            Promise.all([d.determineConnector(), d.determineLoader()])
-                .catch((err) => {
-                    throw new Error(err)
-                })
-                .then(() => {
-                    this.catalogs.set(d.source, d)
-                    resolve(d.source)
-                })
-                .catch((err) => {
-                    reject(err)
-                })
-        })
+    add(c: Catalog): string {
+        if (this.catalogs.has(c.source)) {
+            throw new Error(
+                `${c.source} already exists in workflow ${this.name}`
+            )
+        }
+
+        this.catalogs.set(c.source, c)
+
+        console.log(`added ${c.source} to the workflow`)
+
+        return c.source
     }
 
-    query(q: string): Promise<string> {
-        parseQuery(q)
-            .then((parsed) => {
-                this.qquery = q
-                console.log(parsed)
-            })
-            .catch((err) => {
-                throw new Error(err)
-            })
+    async query(raw: string): Promise<ParsedStatement> {
+        console.log(`parsing statement: ${raw}`)
+
+        let result: ParsedStatement = {}
+
+        const child = spawn(sqlparser, [raw])
+
         return new Promise((resolve, reject) => {
-            resolve("ok")
+            child.on("error", (err) => {
+                reject(err)
+            })
+
+            child.stdout.on("data", (data) => {
+                const parsed = JSON.parse(data.toString())
+                if (parsed.error) {
+                    reject(
+                        `failed-sqlparser: Error while parsing query: ${parsed.error}`
+                    )
+                }
+                result = parsed
+            })
+
+            child.on("close", (code) => {
+                if (code !== 0) {
+                    reject(
+                        `failed-sqlparser: Error while parsing query: ${code}`
+                    )
+                }
+                console.log(JSON.stringify(result, null, 2))
+                resolve(result)
+            })
         })
     }
 }
 
 export function createWorkflow(name: string): Workflow {
     return new Workflow(name)
-}
-
-const credentials = (profile: string) =>
-    fromIni({
-        profile: profile,
-        mfaCodeProvider: async (mfaSerial) => {
-            return mfaSerial
-        }
-    })
-
-let s3: S3Client
-
-function s3Client(config: S3ClientConfig): S3Client {
-    if (!s3) {
-        console.log("setting up s3 client")
-        s3 = new S3Client(config)
-    }
-    return s3
-}
-
-let athena: AthenaClient
-
-function athenaClient(config: AthenaClientConfig): AthenaClient {
-    if (!athena) {
-        console.log("creating athena client")
-        athena = new AthenaClient(config)
-    }
-    return athena
-}
-
-function parseS3Uri(
-    uri: string,
-    options: {
-        file: boolean
-    }
-): {
-    data: {
-        bucket: string
-        key: string
-        file: string
-    }
-    err: string
-} {
-    const opt = {
-        file: options && options.file ? options.file : false
-    }
-
-    if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
-        throw new Error(`invalid-s3-uri: ${uri}`)
-    }
-
-    let err = ""
-    const result = {
-        bucket: "",
-        key: "",
-        file: ""
-    }
-
-    const src = uri.split(":/")[1]
-    const [bucket, ...keys] = src.split("/").splice(1)
-
-    result.bucket = bucket
-    result.key = keys.join("/")
-
-    keys.forEach((k, i) => {
-        if (i === keys.length - 1) {
-            const last = k.split(".").length
-            if (opt.file && last === 1)
-                err = `uri should be a given, given: ${uri}`
-
-            if (!opt.file && last === 1) return
-
-            if (!opt.file && last > 1) {
-                err = `Invalid S3 uri, ${uri} should not end with a file name`
-                return
-            }
-
-            if (!opt.file && k.split(".")[1] !== "" && last > 1)
-                err = `${uri} should not be a file endpoint: ${k}`
-
-            if (last > 1 && k.split(".")[1] !== "") result.file = k
-        }
-    })
-    return {
-        data: result,
-        err: err
-    }
 }

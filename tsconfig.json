@@ -3,15 +3,14 @@
   "exclude": [
     "node_modules",
     "dist",
-    "test",
-    "docs"
+    "test"
   ],
   "compilerOptions": {
     "declaration": true,
     "module": "es2020",
-    "moduleResolution": "Node",
+    "moduleResolution": "node",
     "baseUrl": ".",
-    "declarationDir": "./dist/types",
+    "declarationDir": "./types",
     "emitDeclarationOnly": true
   },
   "include": [
