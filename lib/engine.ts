@@ -1,11 +1,20 @@
 import fs from "fs"
-import {ChildProcessWithoutNullStreams, spawn} from "child_process"
+import { ChildProcessWithoutNullStreams, spawn } from "child_process"
 import os from "os"
-import path, {join} from "path"
-import {VFile} from "vfile"
-import {createInterface} from "readline"
-import {CreateMultipartUploadCommand, PutObjectCommand, S3Client, S3ClientConfig} from "@aws-sdk/client-s3"
-import {fromIni} from "@aws-sdk/credential-providers"
+import path, { join } from "path"
+import { VFile } from "vfile"
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { parse } from "pgsql-parser"
+
+import { createInterface } from "readline"
+import {
+    CreateMultipartUploadCommand,
+    PutObjectCommand,
+    S3Client,
+    S3ClientConfig
+} from "@aws-sdk/client-s3"
+import { fromIni } from "@aws-sdk/credential-providers"
 
 enum Delimiter {
     COMMA = ",",
@@ -22,7 +31,6 @@ type env = "local" | "aws"
 type connectorType = S3Client | fs.ReadStream
 type loaderType = S3Client | fs.ReadStream
 
-// TODO: better error message for warning and errors in transform
 type catalogStateType =
     | "init"
     | "transforming"
@@ -60,28 +68,6 @@ type CatalogOptions = {
     quotes: boolean
     output: "csv" | "json"
     delimiter: Delimiter
-}
-
-const sqlparser = join(
-    process.cwd(),
-    "node_modules",
-    ".bin",
-    "sqlparser@v0.1.4"
-)
-
-type ParsedStatement = {
-    Cache?: string
-    Comments?: string
-    Distinct?: string
-    Hints?: string
-    SelectExprs?: []
-    From?: []
-    Where?: string
-    GroupBy?: null
-    Having?: null
-    OrderBy?: []
-    Limit?: null
-    Lock?: ""
 }
 
 const credentials = (profile: string) =>
@@ -161,6 +147,23 @@ function parseS3Uri(
     }
 }
 
+type ParsedStatement = {
+    raw: string
+    selectStmt: SelectStmt
+}
+
+enum LIMIT {
+    LIMIT_OPTION_DEFAUL
+}
+
+type SelectStmt = {
+    distinctClause: []
+    targetList: []
+    fromClause: []
+    whereClause: []
+    limitOption: LIMIT
+}
+
 class Catalog {
     name: string
     source: string
@@ -171,6 +174,7 @@ class Catalog {
     state: catalogStateType
     vfile: VFile
     pcount: number
+    stmt: ParsedStatement
 
     constructor(source: string, options: CatalogOptions) {
         this.name =
@@ -182,7 +186,17 @@ class Catalog {
         this.init = new Date()
         this.state = "init"
         this.pcount = 0
-        this.vfile = new VFile({path: this.source})
+        this.vfile = new VFile({ path: this.source })
+        this.stmt = {
+            raw: "",
+            selectStmt: {
+                distinctClause: [],
+                targetList: [],
+                fromClause: [],
+                whereClause: [],
+                limitOption: LIMIT.LIMIT_OPTION_DEFAUL
+            }
+        }
     }
 
     async toJson(): Promise<ChildProcessWithoutNullStreams> {
@@ -352,23 +366,23 @@ class Catalog {
         }
 
         if (os.platform() === "win32") {
-            // todo: handle
+            // todo
             throw new Error(`scream`)
         }
 
         const mime = this.exec("file", [path, "--mime-type"])
 
-        const mimeRes = await this.promisifyProcessResult(mime)
+        const res = await this.promisifyProcessResult(mime)
 
-        if (mimeRes.stderr) {
-            throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
+        if (res.stderr) {
+            throw new Error(`failed-to-detect-mime-type: ${res.stderr}`)
         }
 
-        if (mimeRes.code !== 0) {
-            throw new Error(`failed-to-detect-mime-type: ${mimeRes.stderr}`)
+        if (res.code !== 0) {
+            throw new Error(`failed-to-detect-mime-type: ${res.stderr}`)
         }
 
-        shape.type = mimeRes.stdout.split(":")[1].trim()
+        shape.type = res.stdout.split(":")[1].trim()
 
         const readLine = createInterface({
             input: fs.createReadStream(path),
@@ -389,6 +403,7 @@ class Catalog {
 
         readLine.on("line", (current) => {
             if (count === 0) {
+                // ehh
                 delimiters.forEach((d) => {
                     if (current.split(d).length > 1) {
                         first.row = current.split(d)
@@ -399,22 +414,19 @@ class Catalog {
                 if (first.del === "" || first.row.length <= 1) {
                     shape.errors[
                         "unrecognizedDelimiter"
-                        ] = `${path} does not have a recognized delimiter`
+                    ] = `${path} does not have a recognized delimiter`
                     shape.header = false
                 }
-                const isDigit = /\d+/
 
-                const hasDigitInHeader = first.row.some((el) => isDigit.test(el));
-
-
-                console.log(hasDigitInHeader)
-                // if (hasDigitInHeader) {
-                //     shape.header = false;
-                //     shape.warnings["noHeader"] = `no header found`;
-                //     count++;
-                //     return;
-                // }
-
+                // this ehh too
+                first.row.forEach((r) => {
+                    if (!isNaN(parseInt(r.substring(0, 3)))) {
+                        shape.header = false
+                        shape.warnings["noHeader"] = `no header found`
+                        count++
+                        return
+                    }
+                })
                 shape.header = true
                 shape.delimiter = first.del
                 shape.columns = first.row
@@ -426,11 +438,11 @@ class Catalog {
 
                 if (previous) {
                     if (inlineQuotes % 2 !== 0) {
-                        // TODO: make sure previous + current
-                        // console.log(previous + l);
+                        // TODO: previous + current ?
                         shape.spanMultipleLines = true
                     }
                 }
+
                 // if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
                 if (
                     inlineQuotes % 2 !== 0 &&
@@ -555,10 +567,10 @@ class Catalog {
 
         if (fSize > 100 * 1024 * 1024) {
             //TODO: init multipart upload then upload parts
-            console.warn(`file size ${fSize} is larger than 100MB`)
+            console.warn(`file size ${fSize} is larger`)
         }
 
-        const {data: uri, err} = parseS3Uri(this.destination, {
+        const { data: uri, err } = parseS3Uri(this.destination, {
             file: true
         })
 
@@ -570,7 +582,7 @@ class Catalog {
             uri.file = path.basename(this.source)
             console.warn(
                 "Destination filename not provided. Using source source basename" +
-                uri.file
+                    uri.file
             )
         }
 
@@ -679,6 +691,11 @@ class Catalog {
             })
         })
     }
+
+    parseSql(raw: string) {
+        const parsed = parse(raw)
+        fs.writeFileSync("tmpp.json", JSON.stringify(parsed, null, 2))
+    }
 }
 
 export async function createCatalog(
@@ -747,52 +764,39 @@ class Workflow {
         return this.catalogs.get(source) || null
     }
 
-    add(c: Catalog): string {
-        if (this.catalogs.has(c.source)) {
-            throw new Error(
-                `${c.source} already exists in workflow ${this.name}`
-            )
+    add(catalog: Catalog | [Catalog]): string | string[] {
+        if (Array.isArray(catalog)) {
+            if (catalog.length === 1 && catalog[0].source) {
+                const c = catalog[0]
+                if (this.catalogs.has(c.source)) {
+                    throw new Error(`duplicate-dataset: ${c.source}`)
+                }
+                this.catalogs.set(c.source, c)
+                return c.source
+            }
+
+            const catalogSet: Set<string> = new Set()
+
+            catalog.forEach((c) => {
+                if (this.catalogs.has(c.source)) {
+                    throw new Error(`duplicate-dataset: ${c.source}`)
+                }
+                console.log(`added ${c.source} to the workflow`)
+                this.catalogs.set(c.source, c)
+                catalogSet.add(c.source)
+            })
+            return Array.from(catalogSet)
         }
 
-        this.catalogs.set(c.source, c)
+        if (this.catalogs.has(catalog.source)) {
+            throw new Error(`duplicate-dataset: ${catalog.source}`)
+        }
 
-        console.log(`added ${c.source} to the workflow`)
+        this.catalogs.set(catalog.source, catalog)
 
-        return c.source
-    }
+        console.log(`added ${catalog.source} to the workflow`)
 
-    async query(raw: string): Promise<ParsedStatement> {
-        console.log(`parsing statement: ${raw}`)
-
-        let result: ParsedStatement = {}
-
-        const child = spawn(sqlparser, [raw])
-
-        return new Promise((resolve, reject) => {
-            child.on("error", (err) => {
-                reject(err)
-            })
-
-            child.stdout.on("data", (data) => {
-                const parsed = JSON.parse(data.toString())
-                if (parsed.error) {
-                    reject(
-                        `failed-sqlparser: Error while parsing query: ${parsed.error}`
-                    )
-                }
-                result = parsed
-            })
-
-            child.on("close", (code) => {
-                if (code !== 0) {
-                    reject(
-                        `failed-sqlparser: Error while parsing query: ${code}`
-                    )
-                }
-                console.log(JSON.stringify(result, null, 2))
-                resolve(result)
-            })
-        })
+        return catalog.source
     }
 }
 

@@ -1,10 +1,6 @@
 {
   "extends": "@tsconfig/recommended/tsconfig.json",
-  "exclude": [
-    "node_modules",
-    "dist",
-    "test"
-  ],
+  "exclude": ["node_modules", "dist", "test"],
   "compilerOptions": {
     "declaration": true,
     "module": "es2020",
@@ -13,7 +9,5 @@
     "declarationDir": "./types",
     "emitDeclarationOnly": true
   },
-  "include": [
-    "lib/index.ts"
-  ]
+  "include": ["lib/index.ts"]
 }

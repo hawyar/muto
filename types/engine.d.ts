@@ -26,18 +26,18 @@ declare type CatalogOptions = {
     delimiter: Delimiter;
 };
 declare type ParsedStatement = {
-    Cache?: string;
-    Comments?: string;
-    Distinct?: string;
-    Hints?: string;
-    SelectExprs?: [];
-    From?: [];
-    Where?: string;
-    GroupBy?: null;
-    Having?: null;
-    OrderBy?: [];
-    Limit?: null;
-    Lock?: "";
+    raw: string;
+    selectStmt: SelectStmt;
+};
+declare enum LIMIT {
+    LIMIT_OPTION_DEFAUL = 0
+}
+declare type SelectStmt = {
+    distinctClause: [];
+    targetList: [];
+    fromClause: [];
+    whereClause: [];
+    limitOption: LIMIT;
 };
 declare class Catalog {
     name: string;
@@ -49,6 +49,7 @@ declare class Catalog {
     state: catalogStateType;
     vfile: VFile;
     pcount: number;
+    stmt: ParsedStatement;
     constructor(source: string, options: CatalogOptions);
     toJson(): Promise<ChildProcessWithoutNullStreams>;
     toCSV(): Promise<ChildProcessWithoutNullStreams>;
@@ -64,6 +65,7 @@ declare class Catalog {
     initMultipartUpload(bucket: string, key: string): Promise<string>;
     exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams;
     promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult>;
+    parseSql(raw: string): void;
 }
 export declare function createCatalog(source: string, opt: CatalogOptions): Promise<Catalog>;
 declare class Workflow {
@@ -76,8 +78,7 @@ declare class Workflow {
     list(): Catalog[];
     remove(dataset: Catalog): void;
     get(source: string): Catalog | null;
-    add(c: Catalog): string;
-    query(raw: string): Promise<ParsedStatement>;
+    add(catalog: Catalog | [Catalog]): string | string[];
 }
 export declare function createWorkflow(name: string): Workflow;
 export {};

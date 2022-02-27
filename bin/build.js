@@ -92,24 +92,34 @@ async function build() {
         console.log(`skipped: ${sqlparser} already installed`)
     }
 
-    const mutoBuild = await esbuild.build({
+    const esm = await esbuild.build({
         entryPoints: [path.join(process.cwd(), "lib/index.ts")],
         bundle: true,
         minify: true,
-        sourcemap: true,
         target: "es6",
         platform: "node",
         logLevel: "info",
         format: "esm",
+        outfile: path.join(process.cwd(), "dist/muto.mjs"),
+        plugins: [nodeExternalsPlugin()]
+    })
+
+    const cjs = await esbuild.build({
+        entryPoints: [path.join(process.cwd(), "lib/index.ts")],
+        bundle: true,
+        minify: true,
+        target: "es6",
+        platform: "node",
+        logLevel: "info",
+        format: "cjs",
         outfile: path.join(process.cwd(), "dist/muto.js"),
         plugins: [nodeExternalsPlugin()]
     })
 
-    const cliBuild = await esbuild.build({
+    const cli = await esbuild.build({
         entryPoints: [path.join(process.cwd(), "bin/cli.js")],
-        bundle: true,
+        // bundle: true,
         minify: false,
-        sourcemap: true,
         target: "es6",
         logLevel: "info",
         platform: "node",
@@ -118,7 +128,7 @@ async function build() {
         plugins: [nodeExternalsPlugin()]
     })
 
-    await Promise.all([mutoBuild, cliBuild]).catch((err) => {
+    await Promise.all([cjs, esm, cli]).catch((err) => {
         console.error(err)
         process.exit(1)
     })

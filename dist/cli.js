@@ -15,282 +15,13 @@ var __async = (__this, __arguments, generator) => {
         reject(e);
       }
     };
-    var step = (x2) => x2.done ? resolve(x2.value) : Promise.resolve(x2.value).then(fulfilled, rejected);
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
     step((generator = generator.apply(__this, __arguments)).next());
   });
 };
-
-// bin/cli.js
 import arg from "arg";
-
-// dist/muto.js
-import c from "fs";
-import { spawn as E } from "child_process";
-import x from "os";
-import C, { join as $ } from "path";
-import { VFile as W } from "vfile";
-import { createInterface as k } from "readline";
-import { CreateMultipartUploadCommand as O, PutObjectCommand as z, S3Client as N } from "@aws-sdk/client-s3";
-import { fromIni as R } from "@aws-sdk/credential-providers";
-var d = (n, e, t) => new Promise((r, s) => {
-  var o = (i) => {
-    try {
-      l(t.next(i));
-    } catch (u) {
-      s(u);
-    }
-  }, a = (i) => {
-    try {
-      l(t.throw(i));
-    } catch (u) {
-      s(u);
-    }
-  }, l = (i) => i.done ? r(i.value) : Promise.resolve(i.value).then(o, a);
-  l((t = t.apply(n, e)).next());
-});
-var p = $(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
-var q = $(process.cwd(), "node_modules", ".bin", "sqlparser@v0.1.4");
-var S = (n) => R({ profile: n, mfaCodeProvider: (e) => d(void 0, null, function* () {
-  return e;
-}) });
-var v;
-function g(n) {
-  return v || (console.log("setting up s3 client"), v = new N(n)), v;
-}
-function M(n, e) {
-  let t = { file: e && e.file ? e.file : false };
-  if (!n.startsWith("s3://") || n.split(":/")[0] !== "s3")
-    throw new Error(`invalid-s3-uri: ${n}`);
-  let r = "", s = { bucket: "", key: "", file: "" }, o = n.split(":/")[1], [a, ...l] = o.split("/").splice(1);
-  return s.bucket = a, s.key = l.join("/"), l.forEach((i, u) => {
-    if (u === l.length - 1) {
-      let h = i.split(".").length;
-      if (t.file && h === 1 && (r = `uri should be a given, given: ${n}`), !t.file && h === 1)
-        return;
-      if (!t.file && h > 1) {
-        r = `Invalid S3 uri, ${n} should not end with a file name`;
-        return;
-      }
-      !t.file && i.split(".")[1] !== "" && h > 1 && (r = `${n} should not be a file endpoint: ${i}`), h > 1 && i.split(".")[1] !== "" && (s.file = i);
-    }
-  }), { data: s, err: r };
-}
-var P = class {
-  constructor(e, t) {
-    this.name = t && t.name ? t.name : C.basename(e), this.source = e, this.options = t, this.destination = t.destination, this.env = "local", this.init = new Date(), this.state = "init", this.pcount = 0, this.vfile = new W({ path: this.source });
-  }
-  toJson() {
-    return d(this, null, function* () {
-      let e = this.exec(p, ["--icsv", "--ojson", "clean-whitespace", this.source]);
-      if (!e.stdout)
-        throw new Error(`failed to convert ${this.source} from CSV to JSON`);
-      return e;
-    });
-  }
-  toCSV() {
-    return d(this, null, function* () {
-      let e = this.exec(p, ["--icsv", "--ocsv", "cat", this.source]);
-      if (!e.stdout)
-        throw new Error(`failed to convert ${this.source} from JSON to CSV`);
-      return e;
-    });
-  }
-  rowCount() {
-    return d(this, null, function* () {
-      let e = yield this.exec(p, ["--ojson", "count", this.source]), t = yield this.promisifyProcessResult(e);
-      if (t.code !== 0)
-        throw new Error(`Error while counting rows: ${t.stderr}`);
-      if (t.stderr)
-        throw new Error(t.stderr);
-      let r = JSON.parse(t.stdout);
-      if (r.length === 0)
-        throw new Error("No rows found");
-      return r[0].count;
-    });
-  }
-  getColumnHeader() {
-    return d(this, null, function* () {
-      let e = yield this.exec(p, ["--icsv", "--ojson", "head", "-n", "1", this.source]), t = yield this.promisifyProcessResult(e);
-      if (t.code !== 0)
-        return null;
-      if (t.stderr)
-        throw new Error(t.stderr);
-      let r = JSON.parse(t.stdout);
-      if (r.length === 0)
-        return null;
-      let s = Object.keys(r[0]);
-      return this.vfile.data.columns = s, s;
-    });
-  }
-  preview(e = 20, t) {
-    return d(this, null, function* () {
-      let r, s = 1024 * 1024 * 10, a = yield c.promises.stat(this.source);
-      if (t && t !== this.source && c.createWriteStream(t) instanceof c.WriteStream || a.size > s) {
-        if (t === void 0)
-          throw new Error("stream-destination-undefined");
-        return r = c.createWriteStream(t), (yield this.exec(p, ["--icsv", "--ojson", "head", "-n", e.toString(), this.source])).stdout.pipe(r), console.warn(`\u{1F440} Preview saved to: ${t}`), t;
-      }
-      let l = yield this.exec(p, ["--icsv", "--ojson", "head", "-n", e.toString(), this.source]), i = yield this.promisifyProcessResult(l);
-      if (i.stderr)
-        throw new Error(i.stderr);
-      if (i.code !== 0)
-        throw new Error("Error while executing mlr command");
-      return this.vfile.data.preview = JSON.parse(i.stdout), JSON.parse(i.stdout);
-    });
-  }
-  detectShape() {
-    return d(this, null, function* () {
-      let e = this.source, t = { type: "", size: 0, columns: [], header: false, encoding: "utf-8", bom: false, spanMultipleLines: false, quotes: false, delimiter: ",", errors: {}, warnings: {}, preview: [] };
-      if (!c.existsSync(e))
-        throw new Error(`path-doesnt-exists: ${e} ,provide a valid path to a CSV file`);
-      if (t.size = c.statSync(e).size, t.size > 1024 * 1024 * 1024)
-        throw new Error(`file-size-exceeds-limit: ${e} is too large, please limit to under 1GB for now`);
-      if (!c.existsSync(e))
-        throw new Error(`${e} does not exist, provide a valid path to a CSV file`);
-      if (x.platform() === "win32")
-        throw new Error("scream");
-      let r = this.exec("file", [e, "--mime-type"]), s = yield this.promisifyProcessResult(r);
-      if (s.stderr)
-        throw new Error(`failed-to-detect-mime-type: ${s.stderr}`);
-      if (s.code !== 0)
-        throw new Error(`failed-to-detect-mime-type: ${s.stderr}`);
-      t.type = s.stdout.split(":")[1].trim();
-      let o = k({ input: c.createReadStream(e), crlfDelay: 1 / 0 }), a = 0, l = 20, i = { row: [""], del: "" }, u = "", h = [",", ";", "	", "|", ":", " ", "|"];
-      o.on("line", (f) => {
-        if (a === 0) {
-          h.forEach((m) => {
-            f.split(m).length > 1 && (i.row = f.split(m), i.del = m);
-          }), (i.del === "" || i.row.length <= 1) && (t.errors.unrecognizedDelimiter = `${e} does not have a recognized delimiter`, t.header = false);
-          let w = /\d+/, y = i.row.some((m) => w.test(m));
-          console.log(y), t.header = true, t.delimiter = i.del, t.columns = i.row;
-        }
-        if (a > 0 && a < l) {
-          let w = f.split('"').length - 1;
-          if (u && w % 2 !== 0 && (t.spanMultipleLines = true), w % 2 !== 0 && f.split('""').length - 1 !== 1 && (u = f), f.split(i.del).length !== i.row.length) {
-            t.errors.rowWidthMismatch = "row width mismatch";
-            return;
-          }
-          t.preview.push(f.split(i.del));
-        }
-        a++;
-      }), o.on("close", () => {
-        this.vfile.data.shape = t;
-      });
-    });
-  }
-  determineLoader() {
-    if (this.destination.startsWith("s3://")) {
-      this.vfile.data.loader = g({ credentials: S("default"), region: "us-east-2" });
-      return;
-    }
-    if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
-      this.vfile.data.loader = c.createReadStream(this.source);
-      return;
-    }
-  }
-  determineConnector() {
-    switch (this.env) {
-      case "local":
-        if (!c.existsSync(this.source))
-          throw new Error(`file: ${this.source} not found, please provide a valid file path`);
-        this.vfile.data.connector = c.createReadStream(this.source);
-        break;
-      case "aws":
-        this.vfile.data.connector = g({ credentials: S("default"), region: "us-east-2" });
-        break;
-      default:
-        throw new Error(`unsupported-source for: ${this.source}`);
-    }
-  }
-  determineEnv() {
-    if (this.vfile.data.source = this.source, this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
-      this.env = "local";
-      return;
-    }
-    if (this.source.startsWith("s3://")) {
-      this.env = "aws";
-      return;
-    }
-    throw new Error(`invalid-source-type: ${this.source}`);
-  }
-  fileSize() {
-    let e = 1024 * 1024 * 50;
-    if (!c.existsSync(this.source))
-      throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`);
-    let t = c.statSync(this.source);
-    if (t.size > e)
-      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`);
-    return t.size;
-  }
-  uploadToS3() {
-    return d(this, null, function* () {
-      if (!this.source || !this.destination)
-        throw new Error("source or destination not set. Both must be defined to upload to S3");
-      let e = c.createReadStream(this.source);
-      if (!e.readable)
-        throw new Error("failed-to-read-source: Make sure the provided file is readable");
-      let t = this.fileSize();
-      t > 100 * 1024 * 1024 && console.warn(`file size ${t} is larger than 100MB`);
-      let { data: r, err: s } = M(this.destination, { file: true });
-      if (s.toString().startsWith("invalid-s3-uri"))
-        throw new Error(`failed-to-parse-s3-uri: ${s}`);
-      r.file || (r.file = C.basename(this.source), console.warn("Destination filename not provided. Using source source basename" + r.file)), console.log(`uploading ${this.source} to ${this.destination}`);
-      let a = yield g({ region: "us-east-2" }).send(new z({ Bucket: r.bucket, Key: r.key + r.file, Body: e })).catch((l) => {
-        throw new Error(`failed-upload-s3: Error while uploading to S3: ${l}`);
-      }).finally(() => {
-        e.close();
-      });
-      if (a.$metadata.httpStatusCode !== 200)
-        throw new Error(`failed-upload-s3: Error while uploading to S3: ${a.$metadata.httpStatusCode}`);
-      if (!a.$metadata.requestId)
-        throw new Error(`failed-upload-s3: Error while uploading to S3: ${a.$metadata.httpStatusCode}`);
-      return a.$metadata.requestId;
-    });
-  }
-  initMultipartUpload(e, t) {
-    return d(this, null, function* () {
-      let r = g({ credentials: S("default"), region: "us-east-2" }), s = new O({ Bucket: e, ContentEncoding: "utf8", ContentType: "text/csv", Key: t }), o = yield r.send(s);
-      if (o.$metadata.httpStatusCode !== 200)
-        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${o.UploadId} with status code ${o.$metadata.httpStatusCode}`);
-      if (!o.UploadId)
-        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${o.UploadId}`);
-      return o.UploadId;
-    });
-  }
-  exec(e, t) {
-    if (console.log(`exec: ${e} ${t.join(" ")}`), this.pcount > 5)
-      throw new Error(`too-many-processes: ${this.pcount}`);
-    return this.pcount++, E(e, t, {});
-  }
-  promisifyProcessResult(e) {
-    let t = { stdout: "", stderr: "", code: 0 };
-    return new Promise((r, s) => {
-      e.stdout.on("data", (o) => {
-        t.stdout += o;
-      }), e.stderr.on("data", (o) => {
-        t.stderr += o;
-      }), e.on("close", (o) => {
-        t.code = o === 0 ? 0 : 1, r(t);
-      }), e.on("error", (o) => {
-        s(o);
-      });
-    });
-  }
-};
-function I(n, e) {
-  return d(this, null, function* () {
-    return new Promise((t, r) => {
-      n || r(new Error("failed-to-create-dataset: source is required")), (!e || !e.destination) && r(new Error("failed-to-create-dataset: destination is required")), n.endsWith(".csv") || r(new Error(`failed to create dataset: ${n}, source must be a csv file`));
-      let s = new P(n, e);
-      Promise.all([s.determineEnv(), s.detectShape(), s.determineConnector(), s.determineLoader()]).then(() => {
-        console.log(`created catalog for ${n}`), t(s);
-      }).catch((o) => r(o));
-    });
-  });
-}
-
-// bin/cli.js
-var usage = `
+import { createCatalog } from "../dist/muto.js";
+const usage = `
 Usage:
   $muto [options]
   
@@ -303,7 +34,7 @@ Usage:
     -f --from      Path of the file to source from
     -t --to        Destination path of where to save the output to
 `;
-var args = arg({
+const args = arg({
   "--help": Boolean,
   "--version": Boolean,
   "--from": String,
@@ -321,12 +52,12 @@ if (args["--version"]) {
   stdWrite(`v0.1.0`);
   process.exit(0);
 }
-var commands = args["_"];
+const commands = args["_"];
 if (Object.keys(args).length === 1) {
   stdWrite(usage);
   process.exit(0);
 }
-var operations = {
+const operations = {
   upload: "UPLOAD"
 };
 void function run() {
@@ -344,7 +75,7 @@ void function run() {
     if (commands.indexOf("upload") == -1) {
       input.operation = operations.upload;
     }
-    const dataset = yield I(input.from, {
+    const dataset = yield createCatalog(input.from, {
       name: "albums",
       destination: "s3://hwyr-cms/testme/albums.csv",
       output: "json"
@@ -361,4 +92,3 @@ process.on("unhandledRejection", (reason, promise) => {
   stdWrite(reason);
   process.exit(1);
 });
-//# sourceMappingURL=cli.js.map

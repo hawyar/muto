@@ -1,37 +1,25 @@
 import tap from "tap"
 import path from "path"
-import {createCatalog, createWorkflow} from "../dist/muto.js"
+import { createCatalog, createWorkflow } from "../dist/muto.mjs"
+import { fileURLToPath } from "url"
 
-// tap.test("create catalaog", async (t) => {
-//     const source = path.join(process.cwd(), "tests", "example", "albums.csv")
+const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-//     const dataset = await createCatalog(source, {
-//         name: "albums",
-//         destination: "s3://hwyr-cms/testme/albums.csv",
-//         output: "json"
-//     })
-
-//     t.same(dataset.vfile.data.source, source)
-//     t.end()
-// })
-
-tap.test("create workflow", async (t) => {
-    const w = createWorkflow("untitled_work")
-
-    const source = path.join(process.cwd(), "tests", "example", "albums.csv")
+tap.test("create catalog", async (t) => {
+    const source = path.join(dirname, "example", "543.csv")
 
     const catalog = await createCatalog(source, {
         name: "albums",
-        destination: "s3://hwyr-cms/testme/albums.csv",
-        output: "json"
+        output: "json",
+        destination: "./beep.json"
     })
 
-    w.add(catalog)
-    // add more catalogs
+    console.log(catalog)
 
-    // language=SQL format=false
-    await w.query(`select * from albums where artist = "The Beatles" limit 12`)
+    const query = `select distinct arrivale_dd, beep as boop from albums where year_of_pub < 2010`
 
-    t.ok(w)
+    catalog.parseSql(query)
+
+    t.ok(catalog)
     t.end()
 })
