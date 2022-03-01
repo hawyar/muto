@@ -26,7 +26,7 @@ Usage:
   $muto [options]
   
   commands:
-    upload    uploads the specified file to S3
+    add    Add new dataset to the workflow
 
   options:
     -v, --version  current version
@@ -49,10 +49,10 @@ if (args["--help"]) {
   process.exit(0);
 }
 if (args["--version"]) {
-  stdWrite(`v0.1.0`);
+  stdWrite("v0.1.0");
   process.exit(0);
 }
-const commands = args["_"];
+const commands = args._;
 if (Object.keys(args).length === 1) {
   stdWrite(usage);
   process.exit(0);
@@ -62,7 +62,7 @@ const operations = {
 };
 void function run() {
   return __async(this, null, function* () {
-    let input = {
+    const input = {
       from: "",
       to: ""
     };

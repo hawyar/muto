@@ -80,6 +80,91 @@ const credentials = (profile: string) =>
 
 let s3: S3Client
 
+function convertAST(raw: { RawStmt: { stmt: { SelectStmt: any } } }[]) {
+    const ast = raw[0].RawStmt.stmt.SelectStmt
+
+    const query = {
+        distinct: false,
+        columns: [],
+        from: [],
+        where: [],
+        groupBy: [],
+        having: [],
+        orderBy: [],
+        limit: {},
+        offset: null,
+        lock: null
+    }
+
+    const limit = ast["limitOption"]
+
+    if (limit === "LIMIT_OPTION_DEFAULT") {
+        query.limit = {
+            type: ast["limitOption"]
+        }
+    }
+
+    if (limit === "LIMIT_OPTION_COUNT" && ast["limitCount"]) {
+        query.limit = {
+            type: ast["limitOption"],
+            val: ast["limitCount"].A_Const.val.Integer.ival
+        }
+    }
+
+    if (ast["distinctClause"]) {
+        query.distinct = true
+    }
+
+    if (ast["targetList"]) {
+        query.columns = ast["targetList"].map((t: { ResTarget: { val: { ColumnRef: { fields: any[] } }; name: any } }) => {
+            const col = t.ResTarget.val.ColumnRef.fields[0]
+
+            if (col.A_Star) {
+                return {
+                    col: "*"
+                }
+            }
+
+            if (t.ResTarget.name) {
+                return {
+                    as: t.ResTarget.name,
+                    col: col.String.str
+                }
+            }
+            return {
+                col: col.String.str
+            }
+        })
+    }
+
+    query.from = ast["fromClause"].map((from: { RangeVar: any }) => {
+        const source = {
+        }
+
+        const t = from.RangeVar
+
+        if (t.schemaname) {
+            source.schemaname = t.schemaname
+        }
+
+        if (t.relname) {
+            source.relname = t.relname
+        }
+
+        if (t.inh) {
+            source.inh = t.inh
+        }
+
+        return source
+    })
+
+    if (ast["sortClause"]) {
+        console.log(ast["sortClause"][0].SortBy)
+    }
+
+    return query
+}
+
 function s3Client(config: S3ClientConfig): S3Client {
     if (!s3) {
         console.log("setting up s3 client")

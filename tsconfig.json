@@ -9,5 +9,5 @@
     "declarationDir": "./types",
     "emitDeclarationOnly": true
   },
-  "include": ["lib/index.ts"]
+  "include": ["lib/engine.ts"]
 }
