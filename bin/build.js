@@ -18,10 +18,10 @@ async function build () {
     win32: 'windows'
   }
 
-  const archMap = {
-    x64: 'amd64',
-    x86: '386'
-  }
+  // const archMap = {
+  //   x64: 'amd64',
+  //   x86: '386'
+  // }
 
   if (os.platform() === 'win32') {
     console.log('TODO support windows')

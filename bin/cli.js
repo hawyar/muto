@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import arg from 'arg'
-import { createCatalog } from '../dist/muto.js'
+// import { createCatalog } from '../dist/muto.js'
 
 const usage = `
 Usage:
@@ -48,7 +48,7 @@ const operations = {
   upload: 'UPLOAD'
 }
 
-void (async function run () {
+async function run () {
   const input = {
     from: '',
     to: ''
@@ -61,15 +61,15 @@ void (async function run () {
     input.to = args['--to']
   }
 
-  if (commands.indexOf('upload') == -1) {
+  if (commands.indexOf('upload') === -1) {
     input.operation = operations.upload
   }
 
-  const dataset = await createCatalog(input.from, {
-    name: 'albums',
-    destination: 's3://hwyr-cms/testme/albums.csv',
-    output: 'json'
-  })
+  // const dataset = await createCatalog(input.from, {
+  //   name: 'albums',
+  //   destination: 's3://hwyr-cms/testme/albums.csv',
+  //   output: 'json'
+  // })
 
   //
   // if (!args["--from"]) {
@@ -143,15 +143,16 @@ void (async function run () {
   //         console.log(d1);
   //     }
   // }
-
   process.exit(0)
-})()
+}
 
 function stdWrite (msg) {
   typeof msg === 'string'
     ? process.stdout.write(`${msg} \n`)
     : process.stdout.write(`${JSON.stringify(msg, null, 2)}\n`)
 }
+
+run().catch(console.error)
 
 // catch unhandled promises
 process.on('unhandledRejection', (reason, promise) => {

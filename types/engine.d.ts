@@ -1,6 +1,6 @@
 /// <reference types="node" />
-import { ChildProcessWithoutNullStreams } from "child_process";
-import { VFile } from "vfile";
+import { ChildProcessWithoutNullStreams } from 'child_process';
+import { VFile } from 'vfile';
 declare enum Delimiter {
     COMMA = ",",
     TAB = "\t",
@@ -9,36 +9,33 @@ declare enum Delimiter {
     SEMICOLON = ";",
     COLON = ":"
 }
-declare type env = "local" | "aws";
-declare type catalogStateType = "init" | "transforming" | "uploading" | "cancelled" | "uploaded" | "ready";
-declare type ProcessResult = {
+declare type env = 'local' | 'aws';
+declare type catalogStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready';
+interface ProcessResult {
     stdout: string;
     stderr: string;
     code: number;
-};
-declare type CatalogOptions = {
+}
+interface CatalogOptions {
     name: string;
     destination: string;
-    columns: Array<string>;
+    columns: string[];
     header: boolean;
     quotes: boolean;
-    output: "csv" | "json";
+    output: 'csv' | 'json';
     delimiter: Delimiter;
-};
-declare type ParsedStatement = {
-    raw: string;
-    selectStmt: SelectStmt;
-};
-declare enum LIMIT {
-    LIMIT_OPTION_DEFAUL = 0
 }
-declare type SelectStmt = {
-    distinctClause: [];
-    targetList: [];
-    fromClause: [];
-    whereClause: [];
-    limitOption: LIMIT;
-};
+interface Stmt {
+    type: string;
+    distinct: boolean;
+    columns: any[];
+    from: any[];
+    sort: {};
+    where: {};
+    group: never[];
+    having: never[];
+    limit: {};
+}
 declare class Catalog {
     name: string;
     source: string;
@@ -49,7 +46,7 @@ declare class Catalog {
     state: catalogStateType;
     vfile: VFile;
     pcount: number;
-    stmt: ParsedStatement;
+    stmt: Stmt;
     constructor(source: string, options: CatalogOptions);
     toJson(): Promise<ChildProcessWithoutNullStreams>;
     toCSV(): Promise<ChildProcessWithoutNullStreams>;
@@ -65,7 +62,6 @@ declare class Catalog {
     initMultipartUpload(bucket: string, key: string): Promise<string>;
     exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams;
     promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult>;
-    parseSql(raw: string): void;
 }
 export declare function createCatalog(source: string, opt: CatalogOptions): Promise<Catalog>;
 declare class Workflow {
@@ -77,8 +73,9 @@ declare class Workflow {
     constructor(name: string);
     list(): Catalog[];
     remove(dataset: Catalog): void;
-    get(source: string): Catalog | null;
+    get(source: string): Catalog | undefined;
     add(catalog: Catalog | [Catalog]): string | string[];
+    query(raw: string): void;
 }
 export declare function createWorkflow(name: string): Workflow;
 export {};

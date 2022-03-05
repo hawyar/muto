@@ -20,7 +20,6 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 import arg from "arg";
-import { createCatalog } from "../dist/muto.js";
 const usage = `
 Usage:
   $muto [options]
@@ -60,7 +59,7 @@ if (Object.keys(args).length === 1) {
 const operations = {
   upload: "UPLOAD"
 };
-void function run() {
+function run() {
   return __async(this, null, function* () {
     const input = {
       from: "",
@@ -72,22 +71,18 @@ void function run() {
     if (args["--to"]) {
       input.to = args["--to"];
     }
-    if (commands.indexOf("upload") == -1) {
+    if (commands.indexOf("upload") === -1) {
       input.operation = operations.upload;
     }
-    const dataset = yield createCatalog(input.from, {
-      name: "albums",
-      destination: "s3://hwyr-cms/testme/albums.csv",
-      output: "json"
-    });
     process.exit(0);
   });
-}();
+}
 function stdWrite(msg) {
   typeof msg === "string" ? process.stdout.write(`${msg} 
 `) : process.stdout.write(`${JSON.stringify(msg, null, 2)}
 `);
 }
+run().catch(console.error);
 process.on("unhandledRejection", (reason, promise) => {
   stdWrite(reason);
   process.exit(1);
