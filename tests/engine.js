@@ -1,6 +1,6 @@
 import tap from 'tap'
 import path from 'path'
-import { createCatalog } from '../dist/muto.mjs'
+import { createCatalog, createWorkflow } from '../dist/muto.mjs'
 import { fileURLToPath } from 'url'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -14,13 +14,12 @@ tap.test('create catalog', async (t) => {
     destination: './beep.json'
   })
 
-  console.log(catalog)
+  const workflow = createWorkflow('untitled_work')
 
-  // const workflow = createWorkflow('untitled_work')
+  workflow.add(catalog)
 
-  // workflow.query('SELECT id, beep as boop from albums')
+  await workflow.query('SELECT album_title, num_of_sales FROM albums')
 
-  // t.ok(workflow)
   t.ok('ok')
   t.end()
 })

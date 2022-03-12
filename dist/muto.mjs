@@ -1,1 +1,686 @@
-var u=(a,t,e)=>new Promise((r,o)=>{var s=n=>{try{l(e.next(n))}catch(d){o(d)}},i=n=>{try{l(e.throw(n))}catch(d){o(d)}},l=n=>n.done?r(n.value):Promise.resolve(n.value).then(s,i);l((e=e.apply(a,t)).next())});import c from"fs";import{spawn as C}from"child_process";import y from"os";import v,{join as E}from"path";import{VFile as x}from"vfile";import{parse as $}from"pgsql-parser";import{createInterface as P}from"readline";import{CreateMultipartUploadCommand as b,PutObjectCommand as O,S3Client as R}from"@aws-sdk/client-s3";import{fromIni as N}from"@aws-sdk/credential-providers";var A=(i=>(i.COMMA=",",i.TAB="	",i.SPACE=" ",i.PIPE="|",i.SEMICOLON=";",i.COLON=":",i))(A||{});const p=E(process.cwd(),"node_modules",".bin","mlr@v6.0.0");function W(a){const t=$(a);c.writeFileSync("temp22.json",JSON.stringify(t,null,2));const e=t[0].RawStmt.stmt.SelectStmt,r={type:"select",distinct:!1,columns:[],from:[],sort:{},where:{},group:[],having:[],order:[],limit:{}},o=e.limitOption;if(o==="LIMIT_OPTION_DEFAULT"&&(r.limit={type:e.limitOption}),o==="LIMIT_OPTION_COUNT"&&e.limitCount&&(r.limit={type:e.limitOption,val:e.limitCount.A_Const.val.Integer.ival}),e.distinctClause&&(r.distinct=!0),e.targetList&&(r.columns=e.targetList.map(s=>{const i=s.ResTarget.val.ColumnRef.fields[0];return i.A_Star?{col:"*"}:s.ResTarget.name?{as:s.ResTarget.name,col:i.String.str}:{col:i.String.str}})),r.from=e.fromClause.map(s=>{const i={schemaname:"",relname:"",inh:""},l=s.RangeVar;return l.schemaname&&(i.schemaname=l.schemaname),l.relname&&(i.relname=l.relname),l.inh&&(i.inh=l.inh),i}),e.whereClause){if(e.whereClause.A_Expr&&e.whereClause.A_Expr.kind==="AEXPR_OP"){const s=e.whereClause.A_Expr,i={operator:"",left:{},right:{}};i.operator=s.name[0].String.str,s.lexpr&&(i.left=s.lexpr.ColumnRef.fields[0].String.str),s.rexpr&&(i.right=s.rexpr.ColumnRef.fields[0].String.str),r.where=i}if(e.whereClause.A_Expr&&e.whereClause.A_Expr.kind==="AEXPR_IN"){const s=e.whereClause.A_Expr}if(e.whereClause.BoolExpr){if(e.whereClause.BoolExpr.boolop==="AND_EXPR"){const s=e.whereClause.BoolExpr.args;console.log(JSON.stringify(s,null,2))}if(e.whereClause.BoolExpr.boolop==="OR_EXPR"){const s=e.whereClause.BoolExpr.args;console.log(JSON.stringify(s,null,2))}}}return r}const g=a=>N({profile:a,mfaCodeProvider:t=>u(void 0,null,function*(){return t})});let S;function w(a){return S||(console.log("setting up s3 client"),S=new R(a)),S}function I(a,t){const e={file:t&&t.file?t.file:!1};if(!a.startsWith("s3://")||a.split(":/")[0]!=="s3")throw new Error(`invalid-s3-uri: ${a}`);let r="";const o={bucket:"",key:"",file:""},s=a.split(":/")[1],[i,...l]=s.split("/").splice(1);return o.bucket=i,o.key=l.join("/"),l.forEach((n,d)=>{if(d===l.length-1){const f=n.split(".").length;if(e.file&&f===1&&(r=`uri should be a given, given: ${a}`),!e.file&&f===1)return;if(!e.file&&f>1){r=`Invalid S3 uri, ${a} should not end with a file name`;return}!e.file&&n.split(".")[1]!==""&&f>1&&(r=`${a} should not be a file endpoint: ${n}`),f>1&&n.split(".")[1]!==""&&(o.file=n)}}),{data:o,err:r}}var k=(t=>(t[t.LIMIT_OPTION_DEFAUL=0]="LIMIT_OPTION_DEFAUL",t))(k||{});class _{constructor(t,e){this.name=e&&e.name?e.name:v.basename(t),this.source=t,this.options=e,this.destination=e.destination,this.env="local",this.init=new Date,this.state="init",this.pcount=0,this.vfile=new x({path:this.source}),this.stmt={type:"",distinct:!1,columns:[],from:[],sort:[],where:{},group:[],having:[],limit:0}}toJson(){return u(this,null,function*(){const t=this.exec(p,["--icsv","--ojson","clean-whitespace",this.source]);if(!t.stdout)throw new Error(`failed to convert ${this.source} from CSV to JSON`);return t})}toCSV(){return u(this,null,function*(){const t=this.exec(p,["--icsv","--ocsv","cat",this.source]);if(!t.stdout)throw new Error(`failed to convert ${this.source} from JSON to CSV`);return t})}rowCount(){return u(this,null,function*(){const t=yield this.exec(p,["--ojson","count",this.source]),e=yield this.promisifyProcessResult(t);if(e.code!==0)throw new Error(`Error while counting rows: ${e.stderr}`);if(e.stderr)throw new Error(e.stderr);const r=JSON.parse(e.stdout);if(r.length===0)throw new Error("No rows found");return r[0].count})}getColumnHeader(){return u(this,null,function*(){const t=yield this.exec(p,["--icsv","--ojson","head","-n","1",this.source]),e=yield this.promisifyProcessResult(t);if(e.code!==0)return null;if(e.stderr)throw new Error(e.stderr);const r=JSON.parse(e.stdout);if(r.length===0)return null;const o=Object.keys(r[0]);return this.vfile.data.columns=o,o})}preview(t=20,e){return u(this,null,function*(){let r;const o=1024*1024*10,i=yield c.promises.stat(this.source);if(e&&e!==this.source&&c.createWriteStream(e)instanceof c.WriteStream||i.size>o){if(e===void 0)throw new Error("stream-destination-undefined");return r=c.createWriteStream(e),(yield this.exec(p,["--icsv","--ojson","head","-n",t.toString(),this.source])).stdout.pipe(r),console.warn(`\u{1F440} Preview saved to: ${e}`),e}const l=yield this.exec(p,["--icsv","--ojson","head","-n",t.toString(),this.source]),n=yield this.promisifyProcessResult(l);if(n.stderr)throw new Error(n.stderr);if(n.code!==0)throw new Error("Error while executing mlr command");return this.vfile.data.preview=JSON.parse(n.stdout),JSON.parse(n.stdout)})}detectShape(){return u(this,null,function*(){const t=this.source,e={type:"",size:0,columns:[],header:!1,encoding:"utf-8",bom:!1,spanMultipleLines:!1,quotes:!1,delimiter:",",errors:{},warnings:{},preview:[]};if(!c.existsSync(t))throw new Error(`path-doesnt-exists: ${t} ,provide a valid path to a CSV file`);if(e.size=c.statSync(t).size,e.size>1024*1024*1024)throw new Error(`file-size-exceeds-limit: ${t} is too large, please limit to under 1GB for now`);if(!c.existsSync(t))throw new Error(`${t} does not exist, provide a valid path to a CSV file`);if(y.platform()==="win32")throw new Error("scream");const r=this.exec("file",[t,"--mime-type"]),o=yield this.promisifyProcessResult(r);if(o.stderr)throw new Error(`failed-to-detect-mime-type: ${o.stderr}`);if(o.code!==0)throw new Error(`failed-to-detect-mime-type: ${o.stderr}`);e.type=o.stdout.split(":")[1].trim();const s=P({input:c.createReadStream(t),crlfDelay:1/0});let i=0;const l=20,n={row:[""],del:""};let d="";const f=[",",";","	","|",":"," ","|"];s.on("line",m=>{if(i===0&&(f.forEach(h=>{m.split(h).length>1&&(n.row=m.split(h),n.del=h)}),(n.del===""||n.row.length<=1)&&(e.errors.unrecognizedDelimiter=`${t} does not have a recognized delimiter`,e.header=!1),n.row.forEach(h=>{isNaN(parseInt(h.substring(0,3)))||(e.header=!1,e.warnings.noHeader="no header found",i++)}),e.header=!0,e.delimiter=n.del,e.columns=n.row),i>0&&i<l){const h=m.split('"').length-1;if(d&&h%2!==0&&(e.spanMultipleLines=!0),h%2!==0&&m.split('""').length-1!==1&&(d=m),m.split(n.del).length!==n.row.length){e.errors.rowWidthMismatch="row width mismatch";return}e.preview.push(m.split(n.del))}i++}),s.on("close",()=>{this.vfile.data.shape=e})})}determineLoader(){if(this.destination.startsWith("s3://")){this.vfile.data.loader=w({credentials:g("default"),region:"us-east-2"});return}(this.source.startsWith("/")||this.source.startsWith("../")||this.source.startsWith("./"))&&(this.vfile.data.loader=c.createReadStream(this.source))}determineConnector(){switch(this.env){case"local":if(!c.existsSync(this.source))throw new Error(`file: ${this.source} not found, please provide a valid file path`);this.vfile.data.connector=c.createReadStream(this.source);break;case"aws":this.vfile.data.connector=w({credentials:g("default"),region:"us-east-2"});break;default:throw new Error(`unsupported-source for: ${this.source}`)}}determineEnv(){if(this.vfile.data.source=this.source,this.source.startsWith("/")||this.source.startsWith("../")||this.source.startsWith("./")){this.env="local";return}if(this.source.startsWith("s3://")){this.env="aws";return}throw new Error(`invalid-source-type: ${this.source}`)}fileSize(){const t=1024*1024*50;if(!c.existsSync(this.source))throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`);const e=c.statSync(this.source);if(e.size>t)throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`);return e.size}uploadToS3(){return u(this,null,function*(){if(!this.source||!this.destination)throw new Error("source or destination not set. Both must be defined to upload to S3");const t=c.createReadStream(this.source);if(!t.readable)throw new Error("failed-to-read-source: Make sure the provided file is readable");const e=this.fileSize();e>100*1024*1024&&console.warn(`file size ${e} is larger`);const{data:r,err:o}=I(this.destination,{file:!0});if(o.toString().startsWith("invalid-s3-uri"))throw new Error(`failed-to-parse-s3-uri: ${o}`);r.file||(r.file=v.basename(this.source),console.warn("Destination filename not provided. Using source source basename"+r.file)),console.log(`uploading ${this.source} to ${this.destination}`);const i=yield w({region:"us-east-2"}).send(new O({Bucket:r.bucket,Key:r.key+r.file,Body:t})).catch(l=>{throw new Error(`failed-upload-s3: Error while uploading to S3: ${l}`)}).finally(()=>{t.close()});if(i.$metadata.httpStatusCode!==200)throw new Error(`failed-upload-s3: Error while uploading to S3: ${i.$metadata.httpStatusCode}`);if(!i.$metadata.requestId)throw new Error(`failed-upload-s3: Error while uploading to S3: ${i.$metadata.httpStatusCode}`);return i.$metadata.requestId})}initMultipartUpload(t,e){return u(this,null,function*(){const r=w({credentials:g("default"),region:"us-east-2"}),o=new b({Bucket:t,ContentEncoding:"utf8",ContentType:"text/csv",Key:e}),s=yield r.send(o);if(s.$metadata.httpStatusCode!==200)throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${s.UploadId} with status code ${s.$metadata.httpStatusCode}`);if(!s.UploadId)throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${s.UploadId}`);return s.UploadId})}exec(t,e){if(console.log(`exec: ${t} ${e.join(" ")}`),this.pcount>5)throw new Error(`too-many-processes: ${this.pcount}`);return this.pcount++,C(t,e,{})}promisifyProcessResult(t){return u(this,null,function*(){const e={stdout:"",stderr:"",code:0};return yield new Promise((r,o)=>{t.stdout.on("data",s=>{e.stdout+=s}),t.stderr.on("data",s=>{e.stderr+=s}),t.on("close",s=>{e.code=s===0?0:1,r(e)}),t.on("error",s=>{o(s)})})})}}function K(a,t){return u(this,null,function*(){return yield new Promise((e,r)=>{a||r(new Error("failed-to-create-dataset: source is required")),(!t||!t.destination)&&r(new Error("failed-to-create-dataset: destination is required")),a.endsWith(".csv")||r(new Error(`failed to create dataset: ${a}, source must be a csv file`));const o=new _(a,t);Promise.all([o.determineEnv(),o.detectShape(),o.determineConnector(),o.determineLoader()]).then(()=>{console.log(`created catalog for ${a}`),e(o)}).catch(s=>r(s))})})}class z{constructor(t){this.name=t,this.catalogs=new Map,this.createdAt=new Date,this.env="local",this.stmt=""}list(){return Array.from(this.catalogs.values())}remove(t){this.catalogs.delete(t.source)}get(t){if(this.catalogs.get(t)!=null)return this.catalogs.get(t)}add(t){if(Array.isArray(t)){if(t.length===1&&t[0].source){const r=t[0];if(this.catalogs.has(r.source))throw new Error(`duplicate-dataset: ${r.source}`);return this.catalogs.set(r.source,r),r.source}const e=new Set;return t.forEach(r=>{if(this.catalogs.has(r.source))throw new Error(`duplicate-dataset: ${r.source}`);console.log(`added ${r.source} to the workflow`),this.catalogs.set(r.source,r),e.add(r.source)}),Array.from(e)}if(this.catalogs.has(t.source))throw new Error(`duplicate-dataset: ${t.source}`);return this.catalogs.set(t.source,t),console.log(`added ${t.source} to the workflow`),t.source}query(t){const e=W(t);console.log(e)}}function G(a){return new z(a)}export{K as createCatalog,G as createWorkflow};
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+import fs from "fs";
+import { spawn } from "child_process";
+import os from "os";
+import path, { join } from "path";
+import { VFile } from "vfile";
+import { parse } from "pgsql-parser";
+import { createInterface } from "readline";
+import {
+  CreateMultipartUploadCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
+import { fromIni } from "@aws-sdk/credential-providers";
+var Delimiter = /* @__PURE__ */ ((Delimiter2) => {
+  Delimiter2["COMMA"] = ",";
+  Delimiter2["TAB"] = "	";
+  Delimiter2["SPACE"] = " ";
+  Delimiter2["PIPE"] = "|";
+  Delimiter2["SEMICOLON"] = ";";
+  Delimiter2["COLON"] = ":";
+  return Delimiter2;
+})(Delimiter || {});
+const mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+function parseAST(raw) {
+  var _a, _b, _c;
+  const rawAST = parse(raw);
+  const ast = rawAST[0].RawStmt.stmt.SelectStmt;
+  const query = {
+    type: "select",
+    distinct: false,
+    columns: [],
+    from: [],
+    sort: {},
+    where: {},
+    group: [],
+    having: [],
+    order: [],
+    limit: {
+      type: "",
+      val: ""
+    }
+  };
+  const limit = ast.limitOption;
+  if (limit === "LIMIT_OPTION_DEFAULT") {
+    query.limit = {
+      type: ast.limitOption,
+      val: ""
+    };
+  }
+  if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
+    query.limit = {
+      type: ast.limitOption,
+      val: ast.limitCount.A_Const.val.Integer.ival
+    };
+  }
+  if (ast.distinctClause !== void 0) {
+    query.distinct = true;
+  }
+  if (ast.targetList !== void 0) {
+    query.columns = ast.targetList.map((t) => {
+      const col = t.ResTarget.val.ColumnRef.fields[0];
+      if (col.A_Star !== void 0) {
+        return {
+          name: "*"
+        };
+      }
+      if (t.ResTarget.name !== void 0) {
+        return {
+          as: t.ResTarget.name,
+          name: col.String.str
+        };
+      }
+      return {
+        name: col.String.str
+      };
+    });
+  }
+  query.from = ast.fromClause.map((from) => {
+    const source = {
+      schemaname: "",
+      relname: "",
+      inh: ""
+    };
+    const t = from.RangeVar;
+    if (t.schemaname !== void 0) {
+      source.schemaname = t.schemaname;
+    }
+    if (t.relname !== void 0) {
+      source.relname = t.relname;
+    }
+    if (t.inh !== void 0) {
+      source.inh = t.inh;
+    }
+    return source;
+  });
+  if (ast.whereClause !== void 0) {
+    if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
+      const expr = ast.whereClause.A_Expr;
+      const where = {
+        operator: "",
+        left: {},
+        right: {}
+      };
+      where.operator = expr.name[0].String.str;
+      if (expr.lexpr !== null) {
+        where.left = expr.lexpr.ColumnRef.fields[0].String.str;
+      }
+      if (expr.rexpr !== null) {
+        where.right = expr.rexpr.ColumnRef.fields[0].String.str;
+      }
+      query.where = where;
+    }
+    if (((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr) !== null && ((_c = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _c.A_Expr.kind) === "AEXPR_IN") {
+      const expr = ast.whereClause.A_Expr;
+      console.log(expr);
+    }
+    if (ast.whereClause.BoolExpr !== null) {
+      if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
+        const args = ast.whereClause.BoolExpr.args;
+        console.log(JSON.stringify(args, null, 2));
+      }
+      if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
+        const args = ast.whereClause.BoolExpr.args;
+        console.log(JSON.stringify(args, null, 2));
+      }
+    }
+  }
+  return query;
+}
+const credentials = (profile) => {
+  return fromIni({
+    profile,
+    mfaCodeProvider: (mfaSerial) => __async(void 0, null, function* () {
+      return mfaSerial;
+    })
+  });
+};
+function s3Client(config) {
+  return new S3Client(config);
+}
+function parseS3Uri(uri, options) {
+  const opt = {
+    file: options.file ? options.file : false
+  };
+  if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
+    throw new Error(`invalid-s3-uri: ${uri}`);
+  }
+  let err = "";
+  const result = {
+    bucket: "",
+    key: "",
+    file: ""
+  };
+  const src = uri.split(":/")[1];
+  const [bucket, ...keys] = src.split("/").splice(1);
+  result.bucket = bucket;
+  result.key = keys.join("/");
+  keys.forEach((k, i) => {
+    if (i === keys.length - 1) {
+      const last = k.split(".").length;
+      if (opt.file && last === 1) {
+        err = `uri should be a given, given: ${uri}`;
+      }
+      if (!opt.file && last === 1)
+        return;
+      if (!opt.file && last > 1) {
+        err = `Invalid S3 uri, ${uri} should not end with a file name`;
+        return;
+      }
+      if (!opt.file && k.split(".")[1] !== "" && last > 1) {
+        err = `${uri} should not be a file endpoint: ${k}`;
+      }
+      if (last > 1 && k.split(".")[1] !== "")
+        result.file = k;
+    }
+  });
+  return {
+    data: result,
+    err
+  };
+}
+class Catalog {
+  constructor(source, options) {
+    this.name = options.name !== "" ? options.name : path.basename(source);
+    this.source = source;
+    this.options = options;
+    this.destination = options.destination;
+    this.env = "local";
+    this.init = new Date();
+    this.state = "init";
+    this.pcount = 0;
+    this.vfile = new VFile({ path: this.source });
+    this.connector = null;
+    this.loader = null;
+    this.stmt = {
+      type: "",
+      distinct: false,
+      columns: [],
+      from: [],
+      sort: [],
+      where: {},
+      group: [],
+      having: [],
+      limit: {
+        type: "",
+        val: ""
+      }
+    };
+  }
+  toJson() {
+    return __async(this, null, function* () {
+      const json = this.exec(mlr, [
+        "--icsv",
+        "--ojson",
+        "clean-whitespace",
+        this.source
+      ]);
+      if (!json.stdout) {
+        throw new Error(`failed to convert ${this.source} from CSV to JSON`);
+      }
+      return json;
+    });
+  }
+  toCSV() {
+    return __async(this, null, function* () {
+      const json = this.exec(mlr, ["--icsv", "--ocsv", "cat", this.source]);
+      if (!json.stdout) {
+        throw new Error(`failed to convert ${this.source} from JSON to CSV`);
+      }
+      return json;
+    });
+  }
+  rowCount() {
+    return __async(this, null, function* () {
+      const count = yield this.exec(mlr, ["--ojson", "count", this.source]);
+      const rowCountExec = yield this.promisifyProcessResult(count);
+      if (rowCountExec.code !== 0) {
+        throw new Error(`Error while counting rows: ${rowCountExec.stderr}`);
+      }
+      if (rowCountExec.stderr) {
+        throw new Error(rowCountExec.stderr);
+      }
+      const r = JSON.parse(rowCountExec.stdout);
+      if (r.length === 0) {
+        throw new Error("No rows found");
+      }
+      return r[0].count;
+    });
+  }
+  getColumnHeader() {
+    return __async(this, null, function* () {
+      const res = yield this.exec(mlr, [
+        "--icsv",
+        "--ojson",
+        "head",
+        "-n",
+        "1",
+        this.source
+      ]);
+      const colExec = yield this.promisifyProcessResult(res);
+      if (colExec.code !== 0) {
+        throw new Error(`Error while getting column header: ${colExec.stderr}`);
+      }
+      const columns = JSON.parse(colExec.stdout);
+      if (columns.length === 0) {
+        throw new Error("No columns found");
+      }
+      const first = Object.keys(columns[0]);
+      this.vfile.data.columns = first;
+    });
+  }
+  preview(count = 20, streamTo) {
+    return __async(this, null, function* () {
+      let write;
+      if (streamTo === void 0) {
+        throw new Error("stream-destination-undefined");
+      }
+      if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
+        write = fs.createWriteStream(streamTo);
+        const previewExec2 = yield this.exec(mlr, [
+          "--icsv",
+          "--ojson",
+          "head",
+          "-n",
+          count.toString(),
+          this.source
+        ]);
+        previewExec2.stdout.pipe(write);
+        console.warn(`preview saved to: ${streamTo}`);
+        return streamTo;
+      }
+      const previewExec = yield this.exec(mlr, [
+        "--icsv",
+        "--ojson",
+        "head",
+        "-n",
+        count.toString(),
+        this.source
+      ]);
+      const prev = yield this.promisifyProcessResult(previewExec);
+      if (prev.stderr) {
+        throw new Error(prev.stderr);
+      }
+      if (prev.code !== 0) {
+        throw new Error("Error while executing mlr command");
+      }
+      this.vfile.data.preview = JSON.parse(prev.stdout);
+      return JSON.parse(prev.stdout);
+    });
+  }
+  detectShape() {
+    return __async(this, null, function* () {
+      const path2 = this.source;
+      const shape = {
+        type: "",
+        size: 0,
+        columns: [],
+        header: false,
+        encoding: "utf-8",
+        bom: false,
+        spanMultipleLines: false,
+        quotes: false,
+        delimiter: ",",
+        errors: {},
+        warnings: {},
+        preview: []
+      };
+      if (!fs.existsSync(path2)) {
+        throw new Error(`path-doesnt-exists: ${path2} ,provide a valid path to a CSV file`);
+      }
+      shape.size = fs.statSync(path2).size;
+      if (shape.size > 1024 * 1024 * 1024) {
+        throw new Error(`file-size-exceeds-limit: ${path2} is too large, please limit to under 1GB for now`);
+      }
+      if (!fs.existsSync(path2)) {
+        throw new Error(`${path2} does not exist, provide a valid path to a CSV file`);
+      }
+      if (os.platform() === "win32") {
+        throw new Error("scream");
+      }
+      const mime = this.exec("file", [path2, "--mime-type"]);
+      const res = yield this.promisifyProcessResult(mime);
+      if (res.stderr) {
+        throw new Error(`failed-to-detect-mime-type: ${res.stderr}`);
+      }
+      if (res.code !== 0) {
+        throw new Error(`failed-to-detect-mime-type: ${res.stderr}`);
+      }
+      shape.type = res.stdout.split(":")[1].trim();
+      const readLine = createInterface({
+        input: fs.createReadStream(path2),
+        crlfDelay: Infinity
+      });
+      let count = 0;
+      const max = 20;
+      const first = {
+        row: [""],
+        del: ""
+      };
+      let previous = "";
+      const delimiters = [",", ";", "	", "|", ":", " ", "|"];
+      readLine.on("line", (current) => {
+        if (count === 0) {
+          delimiters.forEach((d) => {
+            if (current.split(d).length > 1) {
+              first.row = current.split(d);
+              first.del = d;
+            }
+          });
+          if (first.del === "" || first.row.length <= 1) {
+            shape.errors.unrecognizedDelimiter = `${path2} does not have a recognized delimiter`;
+            shape.header = false;
+          }
+          first.row.forEach((r) => {
+            if (!isNaN(parseInt(r.substring(0, 3)))) {
+              shape.header = false;
+              shape.warnings.noHeader = "no header found";
+              count++;
+            }
+          });
+          shape.header = true;
+          shape.delimiter = first.del;
+          shape.columns = first.row;
+        }
+        if (count > 0 && count < max) {
+          const inlineQuotes = current.split('"').length - 1;
+          if (previous) {
+            if (inlineQuotes % 2 !== 0) {
+              shape.spanMultipleLines = true;
+            }
+          }
+          if (inlineQuotes % 2 !== 0 && current.split('""').length - 1 !== 1) {
+            previous = current;
+          }
+          const width = current.split(first.del).length;
+          if (width !== first.row.length) {
+            shape.errors.rowWidthMismatch = "row width mismatch";
+            return;
+          }
+          shape.preview.push(current.split(first.del));
+        }
+        count++;
+      });
+      readLine.on("close", () => {
+        this.vfile.data.shape = shape;
+      });
+    });
+  }
+  determineLoader() {
+    if (this.destination.startsWith("s3://")) {
+      this.loader = s3Client({
+        credentials: credentials("default"),
+        region: "us-east-2"
+      });
+      return;
+    }
+    if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
+      this.loader = fs.createReadStream(this.source);
+    }
+  }
+  determineConnector() {
+    switch (this.env) {
+      case "local":
+        if (!fs.existsSync(this.source)) {
+          throw new Error(`file: ${this.source} not found, please provide a valid file path`);
+        }
+        this.connector = fs.createReadStream(this.source);
+        break;
+      case "aws":
+        this.connector = s3Client({
+          credentials: credentials("default"),
+          region: "us-east-2"
+        });
+        break;
+      default:
+        throw new Error(`unsupported-source for: ${this.source}`);
+    }
+  }
+  determineEnv() {
+    this.vfile.data.source = this.source;
+    if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
+      this.env = "local";
+      return;
+    }
+    if (this.source.startsWith("s3://")) {
+      this.env = "aws";
+      return;
+    }
+    throw new Error(`invalid-source-type: ${this.source}`);
+  }
+  fileSize() {
+    const max = 1024 * 1024 * 50;
+    if (!fs.existsSync(this.source)) {
+      throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`);
+    }
+    const stat = fs.statSync(this.source);
+    if (stat.size > max) {
+      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`);
+    }
+    return stat.size;
+  }
+  uploadToS3() {
+    return __async(this, null, function* () {
+      if (this.source === "") {
+        throw new Error("source not definded");
+      }
+      if (this.destination === "") {
+        throw new Error("destination not definded");
+      }
+      const fStream = fs.createReadStream(this.source);
+      if (!fStream.readable) {
+        throw new Error("failed-to-read-source: Make sure the provided file is readable");
+      }
+      const fSize = this.fileSize();
+      if (fSize > 100 * 1024 * 1024) {
+        console.warn(`file size ${fSize} is larger`);
+      }
+      const { data: uri, err } = parseS3Uri(this.destination, {
+        file: true
+      });
+      if (err.toString().startsWith("invalid-s3-uri")) {
+        throw new Error(`failed-to-parse-s3-uri: ${err}`);
+      }
+      if (uri.file === "") {
+        uri.file = path.basename(this.source);
+        console.warn("Destination filename not provided. Using source source basename" + uri.file);
+      }
+      console.log(`uploading ${this.source} to ${this.destination}`);
+      const s3 = s3Client({
+        region: "us-east-2"
+      });
+      const res = yield s3.send(new PutObjectCommand({
+        Bucket: uri.bucket,
+        Key: uri.key + uri.file,
+        Body: fStream
+      })).catch((err2) => {
+        throw new Error(`failed-upload-s3: Error while uploading to S3: ${err2}`);
+      }).finally(() => {
+        fStream.close();
+      });
+      if (res.$metadata.httpStatusCode !== 200) {
+        throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`);
+      }
+      if (!res.$metadata.requestId) {
+        throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`);
+      }
+      return res.$metadata.requestId;
+    });
+  }
+  initMultipartUpload(bucket, key) {
+    return __async(this, null, function* () {
+      const client = s3Client({
+        credentials: credentials("default"),
+        region: "us-east-2"
+      });
+      const command = new CreateMultipartUploadCommand({
+        Bucket: bucket,
+        ContentEncoding: "utf8",
+        ContentType: "text/csv",
+        Key: key
+      });
+      const result = yield client.send(command);
+      if (result.$metadata.httpStatusCode !== 200) {
+        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`);
+      }
+      if (!result.UploadId) {
+        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`);
+      }
+      return result.UploadId;
+    });
+  }
+  exec(cmd, args) {
+    console.log(`exec: ${cmd} ${args.join(" ")}`);
+    if (this.pcount > 5) {
+      throw new Error(`too-many-processes: ${this.pcount}`);
+    }
+    this.pcount++;
+    return spawn(cmd, args, {});
+  }
+  promisifyProcessResult(child) {
+    return __async(this, null, function* () {
+      const result = {
+        stdout: "",
+        stderr: "",
+        code: 0
+      };
+      return yield new Promise((resolve, reject) => {
+        child.stdout.on("data", (data) => {
+          result.stdout += data;
+        });
+        child.on("close", (code) => {
+          result.code = code === 0 ? 0 : 1;
+          resolve(result);
+        });
+        child.on("error", (err) => {
+          reject(err);
+        });
+      });
+    });
+  }
+}
+function createCatalog(source, opt) {
+  return __async(this, null, function* () {
+    return yield new Promise((resolve, reject) => {
+      if (source === "") {
+        reject(new Error("failed-to-create-dataset: source is required"));
+      }
+      if (opt.destination === "") {
+        reject(new Error("failed-to-create-dataset: destination is required"));
+      }
+      if (!source.endsWith(".csv")) {
+        reject(new Error(`failed to create dataset: ${source}, source must be a csv file`));
+      }
+      const catalog = new Catalog(source, opt);
+      Promise.all([
+        catalog.determineEnv(),
+        catalog.detectShape(),
+        catalog.determineConnector(),
+        catalog.determineLoader()
+      ]).then(() => {
+        console.log(`created catalog for ${source}`);
+        resolve(catalog);
+      }).catch((err) => reject(err));
+    });
+  });
+}
+class Workflow {
+  constructor(name) {
+    this.name = name;
+    this.catalogs = /* @__PURE__ */ new Map();
+    this.createdAt = new Date();
+    this.env = "local";
+    this.stmt = "";
+  }
+  list() {
+    return Array.from(this.catalogs.values());
+  }
+  remove(dataset) {
+    this.catalogs.delete(dataset.source);
+  }
+  get(source) {
+    if (this.catalogs.get(source) != null) {
+      return this.catalogs.get(source);
+    }
+    return void 0;
+  }
+  add(catalog) {
+    if (Array.isArray(catalog)) {
+      if (catalog.length === 1 && catalog[0].name !== "") {
+        const c = catalog[0];
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`);
+        }
+        this.catalogs.set(c.name, c);
+        return c.name;
+      }
+      catalog.forEach((c) => {
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`);
+        }
+        console.log(`added ${c.name} to the workflow`);
+        this.catalogs.set(c.name, c);
+      });
+      return catalog.map((c) => c.name);
+    }
+    if (this.catalogs.has(catalog.name)) {
+      throw new Error(`duplicate-dataset: ${catalog.name}`);
+    }
+    this.catalogs.set(catalog.name, catalog);
+    console.log(`added ${catalog.name} to the workflow`);
+    return catalog.name;
+  }
+  query(raw) {
+    return __async(this, null, function* () {
+      const ast = parseAST(raw);
+      console.log(ast);
+      let from = "";
+      if (ast.from.length === 1) {
+        from = ast.from[0].relname;
+      }
+      if (!this.catalogs.has(from)) {
+        throw new Error(`unknown-catalog: ${from}`);
+      }
+      const catalog = this.catalogs.get(from);
+      if (catalog == null) {
+        throw new Error(`catalog-not-found: ${from}`);
+      }
+      console.log(`querying catalog: ${catalog.name}`);
+      if (ast.columns[0].name === "*") {
+        console.log("columns: *");
+      }
+      if (ast.columns.length > 1) {
+        console.log("columns: ", ast.columns.map((c) => c.name).join(", "));
+      }
+      console.log(JSON.stringify(ast, null, 2));
+    });
+  }
+}
+function createWorkflow(name) {
+  console.log(`created workflow: ${name}`);
+  return new Workflow(name);
+}
+export {
+  createCatalog,
+  createWorkflow
+};

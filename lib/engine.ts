@@ -28,16 +28,10 @@ enum Delimiter {
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 type env = 'local' | 'aws'
-type connectorType = S3Client | fs.ReadStream
-type loaderType = S3Client | fs.ReadStream
+ type connectorType = S3Client | fs.ReadStream
+ type loaderType = S3Client | fs.ReadStream
 
-type catalogStateType =
-    | 'init'
-    | 'transforming'
-    | 'uploading'
-    | 'cancelled'
-    | 'uploaded'
-    | 'ready'
+type catalogStateType = | 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
 
 interface ProcessResult {
   stdout: string
@@ -79,13 +73,17 @@ interface Stmt {
   where: {}
   group: never[]
   having: never[]
-  limit: {}
+  limit: {
+    type: string
+    val: string
+  }
 }
 
 function parseAST (raw: string): Stmt {
   const rawAST = parse(raw)
 
-  fs.writeFileSync('temp22.json', JSON.stringify(rawAST, null, 2))
+  // debug ast
+  // fs.writeFileSync('temp22.json', JSON.stringify(rawAST, null, 2))
 
   const ast = rawAST[0].RawStmt.stmt.SelectStmt
 
@@ -99,49 +97,53 @@ function parseAST (raw: string): Stmt {
     group: [],
     having: [],
     order: [],
-    limit: {}
+    limit: {
+      type: '',
+      val: ''
+    }
   }
 
   const limit = ast.limitOption
 
   if (limit === 'LIMIT_OPTION_DEFAULT') {
     query.limit = {
-      type: ast.limitOption
+      type: ast.limitOption,
+      val: ''
     }
   }
 
-  if (limit === 'LIMIT_OPTION_COUNT' && ast.limitCount) {
+  if (limit === 'LIMIT_OPTION_COUNT' && ast.limitCount !== '') {
     query.limit = {
       type: ast.limitOption,
       val: ast.limitCount.A_Const.val.Integer.ival
     }
   }
 
-  if (ast.distinctClause) {
+  if (ast.distinctClause !== undefined) {
     query.distinct = true
   }
 
-  if (ast.targetList) {
+  if (ast.targetList !== undefined) {
     query.columns = ast.targetList.map(
       (t: {
         ResTarget: { val: { ColumnRef: { fields: any[] } }, name: any }
       }) => {
         const col = t.ResTarget.val.ColumnRef.fields[0]
 
-        if (col.A_Star) {
+        if (col.A_Star !== undefined) {
           return {
-            col: '*'
+            name: '*'
           }
         }
 
-        if (t.ResTarget.name) {
+        if (t.ResTarget.name !== undefined) {
           return {
             as: t.ResTarget.name,
-            col: col.String.str
+            name: col.String.str
           }
         }
         return {
-          col: col.String.str
+          name: col.String.str
         }
       }
     )
@@ -156,15 +158,15 @@ function parseAST (raw: string): Stmt {
 
     const t = from.RangeVar
 
-    if (t.schemaname) {
+    if (t.schemaname !== undefined) {
       source.schemaname = t.schemaname
     }
 
-    if (t.relname) {
+    if (t.relname !== undefined) {
       source.relname = t.relname
     }
 
-    if (t.inh) {
+    if (t.inh !== undefined) {
       source.inh = t.inh
     }
 
@@ -175,8 +177,8 @@ function parseAST (raw: string): Stmt {
   //     console.log(ast["sortClause"][0].SortBy)
   // }
 
-  if (ast.whereClause) {
-    if (ast.whereClause.A_Expr && ast.whereClause.A_Expr.kind === 'AEXPR_OP') {
+  if (ast.whereClause !== undefined) {
+    if (ast.whereClause !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_OP') {
       const expr = ast.whereClause.A_Expr
 
       const where = {
@@ -187,21 +189,22 @@ function parseAST (raw: string): Stmt {
 
       where.operator = expr.name[0].String.str
 
-      if (expr.lexpr) {
+      if (expr.lexpr !== null) {
         where.left = expr.lexpr.ColumnRef.fields[0].String.str
       }
 
-      if (expr.rexpr) {
+      if (expr.rexpr !== null) {
         where.right = expr.rexpr.ColumnRef.fields[0].String.str
       }
       query.where = where
     }
 
-    if (ast.whereClause.A_Expr && ast.whereClause.A_Expr.kind === 'AEXPR_IN') {
+    if (ast?.whereClause?.A_Expr !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_IN') {
       const expr = ast.whereClause.A_Expr
+      console.log(expr)
     }
 
-    if (ast.whereClause.BoolExpr) {
+    if (ast.whereClause.BoolExpr !== null) {
       if (ast.whereClause.BoolExpr.boolop === 'AND_EXPR') {
         const args = ast.whereClause.BoolExpr.args
         console.log(JSON.stringify(args, null, 2))
@@ -216,7 +219,7 @@ function parseAST (raw: string): Stmt {
   return query
 }
 
-const credentials = (profile: string) => {
+const credentials = (profile: string): any => {
   return fromIni({
     profile: profile,
     mfaCodeProvider: async (mfaSerial) => {
@@ -225,14 +228,8 @@ const credentials = (profile: string) => {
   })
 }
 
-let s3: S3Client
-
 function s3Client (config: S3ClientConfig): S3Client {
-  if (!s3) {
-    console.log('setting up s3 client')
-    s3 = new S3Client(config)
-  }
-  return s3
+  return new S3Client(config)
 }
 
 function parseS3Uri (
@@ -249,7 +246,7 @@ function parseS3Uri (
     err: string
   } {
   const opt = {
-    file: options && options.file ? options.file : false
+    file: options.file ? options.file : false
   }
 
   if (!uri.startsWith('s3://') || uri.split(':/')[0] !== 's3') {
@@ -292,18 +289,6 @@ function parseS3Uri (
   }
 }
 
-enum LIMIT {
-  LIMIT_OPTION_DEFAUL
-}
-
-interface SelectStmt {
-  distinctClause: []
-  targetList: []
-  fromClause: []
-  whereClause: []
-  limitOption: LIMIT
-}
-
 class Catalog {
   name: string
   source: string
@@ -315,9 +300,11 @@ class Catalog {
   vfile: VFile
   pcount: number
   stmt: Stmt
+  connector: connectorType | null
+  loader: loaderType | null
 
   constructor (source: string, options: CatalogOptions) {
-    this.name = options && options.name ? options.name : path.basename(source)
+    this.name = options.name !== '' ? options.name : path.basename(source)
     this.source = source
     this.options = options
     this.destination = options.destination
@@ -326,6 +313,8 @@ class Catalog {
     this.state = 'init'
     this.pcount = 0
     this.vfile = new VFile({ path: this.source })
+    this.connector = null
+    this.loader = null
     this.stmt = {
       type: '',
       distinct: false,
@@ -335,7 +324,10 @@ class Catalog {
       where: {},
       group: [],
       having: [],
-      limit: 0
+      limit: {
+        type: '',
+        val: ''
+      }
     }
   }
 
@@ -382,7 +374,7 @@ class Catalog {
     return r[0].count
   }
 
-  async getColumnHeader (): Promise<string[] | null> {
+  async getColumnHeader (): Promise<void> {
     const res = await this.exec(mlr, [
       '--icsv',
       '--ojson',
@@ -395,38 +387,29 @@ class Catalog {
     const colExec = await this.promisifyProcessResult(res)
 
     if (colExec.code !== 0) {
-      return null
+      throw new Error(`Error while getting column header: ${colExec.stderr}`)
     }
 
-    if (colExec.stderr) {
-      throw new Error(colExec.stderr)
-    }
     const columns = JSON.parse(colExec.stdout)
 
     if (columns.length === 0) {
-      return null
+      throw new Error('No columns found')
     }
 
     const first = Object.keys(columns[0])
     this.vfile.data.columns = first
-    return first
   }
 
   async preview (count = 20, streamTo?: string): Promise<string[][] | string> {
     let write: fs.WriteStream
 
-    const maxPreview = 1024 * 1024 * 10
+    // const maxPreview = 1024 * 1024 * 10
+    // const fsp = fs.promises
+    // const stat = await fsp.stat(this.source)
 
-    const fsp = fs.promises
-    const stat = await fsp.stat(this.source)
+    if (streamTo === undefined) { throw new Error('stream-destination-undefined') }
 
-    if (
-      (streamTo &&
-                streamTo !== this.source &&
-                fs.createWriteStream(streamTo) instanceof fs.WriteStream) ||
-            stat.size > maxPreview
-    ) {
-      if (streamTo === undefined) { throw new Error('stream-destination-undefined') }
+    if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
       write = fs.createWriteStream(streamTo)
 
       const previewExec = await this.exec(mlr, [
@@ -605,7 +588,7 @@ class Catalog {
 
   determineLoader (): void {
     if (this.destination.startsWith('s3://')) {
-      this.vfile.data.loader = s3Client({
+      this.loader = s3Client({
         credentials: credentials('default'),
         region: 'us-east-2'
       })
@@ -617,7 +600,7 @@ class Catalog {
             this.source.startsWith('../') ||
             this.source.startsWith('./')
     ) {
-      this.vfile.data.loader = fs.createReadStream(this.source)
+      this.loader = fs.createReadStream(this.source)
     }
   }
 
@@ -625,15 +608,13 @@ class Catalog {
     switch (this.env) {
       case 'local':
         if (!fs.existsSync(this.source)) {
-          throw new Error(
-                        `file: ${this.source} not found, please provide a valid file path`
-          )
+          throw new Error(`file: ${this.source} not found, please provide a valid file path`)
         }
-        this.vfile.data.connector = fs.createReadStream(this.source)
+        this.connector = fs.createReadStream(this.source)
         break
 
       case 'aws':
-        this.vfile.data.connector = s3Client({
+        this.connector = s3Client({
           credentials: credentials('default'),
           region: 'us-east-2'
         })
@@ -644,14 +625,10 @@ class Catalog {
     }
   }
 
-  determineEnv () {
+  determineEnv (): void {
     this.vfile.data.source = this.source
 
-    if (
-      this.source.startsWith('/') ||
-            this.source.startsWith('../') ||
-            this.source.startsWith('./')
-    ) {
+    if (this.source.startsWith('/') || this.source.startsWith('../') || this.source.startsWith('./')) {
       this.env = 'local'
       return
     }
@@ -680,8 +657,12 @@ class Catalog {
   }
 
   async uploadToS3 (): Promise<string> {
-    if (!this.source || !this.destination) {
-      throw new Error('source or destination not set. Both must be defined to upload to S3')
+    if (this.source === '') {
+      throw new Error('source not definded')
+    }
+
+    if (this.destination === '') {
+      throw new Error('destination not definded')
     }
 
     const fStream = fs.createReadStream(this.source)
@@ -707,12 +688,9 @@ class Catalog {
       throw new Error(`failed-to-parse-s3-uri: ${err}`)
     }
 
-    if (!uri.file) {
+    if (uri.file === '') {
       uri.file = path.basename(this.source)
-      console.warn(
-        'Destination filename not provided. Using source source basename' +
-                uri.file
-      )
+      console.warn('Destination filename not provided. Using source source basename' + uri.file)
     }
 
     console.log(`uploading ${this.source} to ${this.destination}`)
@@ -730,9 +708,7 @@ class Catalog {
         })
       )
       .catch((err) => {
-        throw new Error(
-                    `failed-upload-s3: Error while uploading to S3: ${err}`
-        )
+        throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
       })
       .finally(() => {
         fStream.close()
@@ -765,15 +741,11 @@ class Catalog {
     const result = await client.send(command)
 
     if (result.$metadata.httpStatusCode !== 200) {
-      throw new Error(
-                `failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`
-      )
+      throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`)
     }
 
     if (!result.UploadId) {
-      throw new Error(
-                `failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`
-      )
+      throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`)
     }
 
     return result.UploadId
@@ -804,10 +776,6 @@ class Catalog {
         result.stdout += data
       })
 
-      child.stderr.on('data', (data) => {
-        result.stderr += data
-      })
-
       child.on('close', (code) => {
         result.code = code === 0 ? 0 : 1
         resolve(result)
@@ -825,18 +793,18 @@ export async function createCatalog (
   opt: CatalogOptions
 ): Promise<Catalog> {
   return await new Promise((resolve, reject) => {
-    if (!source) {
+    if (source === '') {
       reject(new Error('failed-to-create-dataset: source is required'))
     }
 
-    if (!opt || !opt.destination) {
+    if (opt.destination === '') {
       reject(
         new Error('failed-to-create-dataset: destination is required')
       )
     }
 
     if (!source.endsWith('.csv')) {
-      reject(`failed to create dataset: ${source}, source must be a csv file`)
+      reject(new Error(`failed to create dataset: ${source}, source must be a csv file`))
     }
 
     const catalog = new Catalog(source, opt)
@@ -874,7 +842,7 @@ class Workflow {
     return Array.from(this.catalogs.values())
   }
 
-  remove (dataset: Catalog) {
+  remove (dataset: Catalog): void {
     this.catalogs.delete(dataset.source)
   }
 
@@ -887,46 +855,69 @@ class Workflow {
 
   add (catalog: Catalog | [Catalog]): string | string[] {
     if (Array.isArray(catalog)) {
-      if (catalog.length === 1 && catalog[0].source) {
+      if (catalog.length === 1 && catalog[0].name !== '') {
         const c = catalog[0]
-        if (this.catalogs.has(c.source)) {
-          throw new Error(`duplicate-dataset: ${c.source}`)
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`)
         }
-        this.catalogs.set(c.source, c)
-        return c.source
+        this.catalogs.set(c.name, c)
+        return c.name
       }
 
-      const catalogSet: Set<string> = new Set()
-
       catalog.forEach((c) => {
-        if (this.catalogs.has(c.source)) {
-          throw new Error(`duplicate-dataset: ${c.source}`)
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`)
         }
-        console.log(`added ${c.source} to the workflow`)
-        this.catalogs.set(c.source, c)
-        catalogSet.add(c.source)
+        console.log(`added ${c.name} to the workflow`)
+        this.catalogs.set(c.name, c)
       })
-      return Array.from(catalogSet)
+      return catalog.map((c) => c.name)
     }
 
-    if (this.catalogs.has(catalog.source)) {
-      throw new Error(`duplicate-dataset: ${catalog.source}`)
+    if (this.catalogs.has(catalog.name)) {
+      throw new Error(`duplicate-dataset: ${catalog.name}`)
     }
 
-    this.catalogs.set(catalog.source, catalog)
-
-    console.log(`added ${catalog.source} to the workflow`)
-
-    return catalog.source
+    this.catalogs.set(catalog.name, catalog)
+    console.log(`added ${catalog.name} to the workflow`)
+    return catalog.name
   }
 
-  query (raw: string) {
-    const parsed = parseAST(raw)
+  async query (raw: string): Promise<void> {
+    const ast = parseAST(raw)
 
-    console.log(parsed)
+    console.log(ast)
+
+    let from = ''
+
+    if (ast.from.length === 1) {
+      from = ast.from[0].relname
+    }
+
+    if (!this.catalogs.has(from)) {
+      throw new Error(`unknown-catalog: ${from}`)
+    }
+    const catalog = this.catalogs.get(from)
+
+    if (catalog == null) {
+      throw new Error(`catalog-not-found: ${from}`)
+    }
+
+    console.log(`querying catalog: ${catalog.name}`)
+
+    if (ast.columns[0].name === '*') {
+      console.log('columns: *')
+    }
+
+    if (ast.columns.length > 1) {
+      console.log('columns: ', ast.columns.map((c) => c.name).join(', '))
+    }
+
+    console.log(JSON.stringify(ast, null, 2))
   }
 }
 
 export function createWorkflow (name: string): Workflow {
+  console.log(`created workflow: ${name}`)
   return new Workflow(name)
 }

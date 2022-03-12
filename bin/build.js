@@ -94,7 +94,7 @@ async function build () {
 
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    minify: true,
+    // minify: true,
     target: 'es6',
     platform: 'node',
     logLevel: 'info',
