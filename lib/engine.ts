@@ -16,15 +16,6 @@ import {
 } from '@aws-sdk/client-s3'
 import { fromIni } from '@aws-sdk/credential-providers'
 
-enum Delimiter {
-  COMMA = ',',
-  TAB = '\t',
-  SPACE = ' ',
-  PIPE = '|',
-  SEMICOLON = ';',
-  COLON = ':'
-}
-
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 type env = 'local' | 'aws'
@@ -54,8 +45,18 @@ interface Shape {
   preview: string[][]
 }
 
+enum Delimiter {
+  COMMA = ',',
+  TAB = '\t',
+  SPACE = ' ',
+  PIPE = '|',
+  SEMICOLON = ';',
+  COLON = ':'
+}
+
 interface CatalogOptions {
   name: string
+  source: string
   destination: string
   columns: string[]
   header: boolean
@@ -82,7 +83,6 @@ interface Stmt {
 function parseAST (raw: string): Stmt {
   const rawAST = parse(raw)
 
-  // debug ast
   // fs.writeFileSync('temp22.json', JSON.stringify(rawAST, null, 2))
 
   const ast = rawAST[0].RawStmt.stmt.SelectStmt
@@ -292,12 +292,13 @@ function parseS3Uri (
 class Catalog {
   name: string
   source: string
-  options: CatalogOptions
   destination: string
+  options: CatalogOptions
   init: Date
   env: env
   state: catalogStateType
   vfile: VFile
+  columns: string[]
   pcount: number
   stmt: Stmt
   connector: connectorType | null
@@ -312,9 +313,10 @@ class Catalog {
     this.init = new Date()
     this.state = 'init'
     this.pcount = 0
-    this.vfile = new VFile({ path: this.source })
+    this.columns = []
     this.connector = null
     this.loader = null
+    this.vfile = new VFile({ path: this.source })
     this.stmt = {
       type: '',
       distinct: false,
@@ -336,19 +338,10 @@ class Catalog {
       '--icsv',
       '--ojson',
       'clean-whitespace',
-      this.source
+      this.source,
+      '>',
+      this.destination
     ])
-    if (!json.stdout) {
-      throw new Error(`failed to convert ${this.source} from CSV to JSON`)
-    }
-    return json
-  }
-
-  async toCSV (): Promise<ChildProcessWithoutNullStreams> {
-    const json = this.exec(mlr, ['--icsv', '--ocsv', 'cat', this.source])
-    if (!json.stdout) {
-      throw new Error(`failed to convert ${this.source} from JSON to CSV`)
-    }
     return json
   }
 
@@ -361,20 +354,24 @@ class Catalog {
       throw new Error(`Error while counting rows: ${rowCountExec.stderr}`)
     }
 
-    if (rowCountExec.stderr) {
+    if (rowCountExec.stderr !== '') {
       throw new Error(rowCountExec.stderr)
     }
 
-    const r = JSON.parse(rowCountExec.stdout)
+    const rowCount = JSON.parse(rowCountExec.stdout)
 
-    if (r.length === 0) {
-      throw new Error('No rows found')
+    if (rowCount.length === 0) {
+      throw new Error('Error while counting rows')
     }
 
-    return r[0].count
+    if (rowCount[0].count === undefined) {
+      throw new Error('Error while counting rows')
+    }
+
+    return rowCount[0].count
   }
 
-  async getColumnHeader (): Promise<void> {
+  async headerColumn (): Promise<void> {
     const res = await this.exec(mlr, [
       '--icsv',
       '--ojson',
@@ -395,22 +392,16 @@ class Catalog {
     if (columns.length === 0) {
       throw new Error('No columns found')
     }
-
-    const first = Object.keys(columns[0])
-    this.vfile.data.columns = first
+    this.columns = Object.keys(columns[0])
   }
 
   async preview (count = 20, streamTo?: string): Promise<string[][] | string> {
-    let write: fs.WriteStream
-
-    // const maxPreview = 1024 * 1024 * 10
-    // const fsp = fs.promises
-    // const stat = await fsp.stat(this.source)
-
-    if (streamTo === undefined) { throw new Error('stream-destination-undefined') }
+    if (streamTo === undefined) {
+      throw new Error('stream-destination-undefined')
+    }
 
     if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
-      write = fs.createWriteStream(streamTo)
+      const write = fs.createWriteStream(streamTo)
 
       const previewExec = await this.exec(mlr, [
         '--icsv',
@@ -438,7 +429,7 @@ class Catalog {
 
     const prev = await this.promisifyProcessResult(previewExec)
 
-    if (prev.stderr) {
+    if (prev.stderr !== '') {
       throw new Error(prev.stderr)
     }
 
@@ -450,7 +441,7 @@ class Catalog {
     return JSON.parse(prev.stdout)
   }
 
-  async detectShape (): Promise<void> {
+  async determineShape (): Promise<void> {
     const path = this.source
     const shape: Shape = {
       type: '',
@@ -496,7 +487,7 @@ class Catalog {
 
     const res = await this.promisifyProcessResult(mime)
 
-    if (res.stderr) {
+    if (res.stderr !== '') {
       throw new Error(`failed-to-detect-mime-type: ${res.stderr}`)
     }
 
@@ -555,7 +546,7 @@ class Catalog {
         // there is a chance the record spans next line
         const inlineQuotes = current.split('"').length - 1
 
-        if (previous) {
+        if (previous !== '') {
           if (inlineQuotes % 2 !== 0) {
             // TODO: previous + current ?
             shape.spanMultipleLines = true
@@ -596,10 +587,7 @@ class Catalog {
     }
 
     if (
-      this.source.startsWith('/') ||
-            this.source.startsWith('../') ||
-            this.source.startsWith('./')
-    ) {
+      this.source.startsWith('/') || this.source.startsWith('../') || this.source.startsWith('./')) {
       this.loader = fs.createReadStream(this.source)
     }
   }
@@ -626,8 +614,6 @@ class Catalog {
   }
 
   determineEnv (): void {
-    this.vfile.data.source = this.source
-
     if (this.source.startsWith('/') || this.source.startsWith('../') || this.source.startsWith('./')) {
       this.env = 'local'
       return
@@ -641,18 +627,17 @@ class Catalog {
     throw new Error(`invalid-source-type: ${this.source}`)
   }
 
-  fileSize (): number {
-    const max = 1024 * 1024 * 50
+  async fileSize (): Promise<number> {
+    const max = 50 * 1024 * 1024
 
-    if (!fs.existsSync(this.source)) {
-      throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`)
-    }
-
-    const stat = fs.statSync(this.source)
+    const stat = await fs.promises.stat(this.source)
 
     if (stat.size > max) {
-      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`)
+      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to under 50MB for now`)
     }
+
+    this.vfile.data.size = stat.size
+
     return stat.size
   }
 
@@ -673,11 +658,11 @@ class Catalog {
       )
     }
 
-    const fSize = this.fileSize()
+    const size = await this.fileSize()
 
-    if (fSize > 100 * 1024 * 1024) {
-      // TODO: init multipart upload then upload parts
-      console.warn(`file size ${fSize} is larger`)
+    if (size > 100 * 1024 * 1024) {
+      // TODO: init multipart upload
+      console.warn(`file size ${size} is larger`)
     }
 
     const { data: uri, err } = parseS3Uri(this.destination, {
@@ -714,12 +699,12 @@ class Catalog {
         fStream.close()
       })
 
-    if (res.$metadata.httpStatusCode !== 200) {
+    if (res.$metadata.httpStatusCode !== undefined && res.$metadata.httpStatusCode !== 200) {
       throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
     }
 
-    if (!res.$metadata.requestId) {
-      throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
+    if (res.$metadata.requestId === undefined) {
+      throw new Error('failed-upload-s3')
     }
 
     return res.$metadata.requestId
@@ -740,12 +725,12 @@ class Catalog {
 
     const result = await client.send(command)
 
-    if (result.$metadata.httpStatusCode !== 200) {
-      throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`)
+    if (result.UploadId === undefined || result.$metadata.httpStatusCode !== 200) {
+      throw new Error('failed-multipart-upload')
     }
 
-    if (!result.UploadId) {
-      throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`)
+    if (result.UploadId === undefined) {
+      throw new Error('failed-multipart-upload')
     }
 
     return result.UploadId
@@ -794,7 +779,7 @@ export async function createCatalog (
 ): Promise<Catalog> {
   return await new Promise((resolve, reject) => {
     if (source === '') {
-      reject(new Error('failed-to-create-dataset: source is required'))
+      reject(new Error('invalid-source: the source path is required'))
     }
 
     if (opt.destination === '') {
@@ -804,16 +789,19 @@ export async function createCatalog (
     }
 
     if (!source.endsWith('.csv')) {
-      reject(new Error(`failed to create dataset: ${source}, source must be a csv file`))
+      reject(new Error(`invalid-file-type: expected a .csv file, ${source} is not`))
     }
 
     const catalog = new Catalog(source, opt)
 
     Promise.all([
       catalog.determineEnv(),
-      catalog.detectShape(),
+      catalog.determineShape(),
       catalog.determineConnector(),
-      catalog.determineLoader()
+      catalog.determineLoader(),
+      catalog.headerColumn(),
+      catalog.fileSize(),
+      catalog.rowCount()
     ])
       .then(() => {
         console.log(`created catalog for ${source}`)
@@ -826,7 +814,7 @@ export async function createCatalog (
 class Workflow {
   name: string
   catalogs: Map<string, Catalog>
-  readonly createdAt: Date
+  createdAt: Date
   env: env
   stmt: string
 
@@ -883,13 +871,60 @@ class Workflow {
     return catalog.name
   }
 
+  async promisifyProcessResult (
+    child: ChildProcessWithoutNullStreams
+  ): Promise<ProcessResult> {
+    const result: ProcessResult = {
+      stdout: '',
+      stderr: '',
+      code: 0
+    }
+
+    return await new Promise((resolve, reject) => {
+      child.stdout.on('data', (data) => {
+        result.stdout += data
+      })
+
+      child.on('close', (code) => {
+        result.code = code === 0 ? 0 : 1
+        resolve(result)
+      })
+
+      child.on('error', (err) => {
+        reject(err)
+      })
+    })
+  }
+
+  async exec (cmd: string, args: string[]): Promise<ProcessResult> {
+    const run = spawn(cmd, args)
+
+    const result: ProcessResult = {
+      stdout: '',
+      stderr: '',
+      code: 0
+    }
+
+    return await new Promise((resolve, reject) => {
+      run.stdout.on('data', (data) => {
+        result.stdout += data
+      })
+
+      run.on('close', (code) => {
+        result.code = code === 0 ? 0 : 1
+        resolve(result)
+      })
+
+      run.on('error', (err) => {
+        reject(err)
+      })
+    })
+  }
+
   async query (raw: string): Promise<void> {
     const ast = parseAST(raw)
 
-    console.log(ast)
-
     let from = ''
-
     if (ast.from.length === 1) {
       from = ast.from[0].relname
     }
@@ -911,9 +946,10 @@ class Workflow {
 
     if (ast.columns.length > 1) {
       console.log('columns: ', ast.columns.map((c) => c.name).join(', '))
-    }
 
-    console.log(JSON.stringify(ast, null, 2))
+      const columns = ast.columns.map((c) => c.name).join(',')
+      await this.exec(mlr, ['--icsv', '--ojson', 'cut', '-f', columns, catalog.source, '>', catalog.destination])
+    }
   }
 }
 

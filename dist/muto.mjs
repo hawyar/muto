@@ -31,6 +31,7 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import { fromIni } from "@aws-sdk/credential-providers";
+const mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 var Delimiter = /* @__PURE__ */ ((Delimiter2) => {
   Delimiter2["COMMA"] = ",";
   Delimiter2["TAB"] = "	";
@@ -40,7 +41,6 @@ var Delimiter = /* @__PURE__ */ ((Delimiter2) => {
   Delimiter2["COLON"] = ":";
   return Delimiter2;
 })(Delimiter || {});
-const mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 function parseAST(raw) {
   var _a, _b, _c;
   const rawAST = parse(raw);
@@ -209,9 +209,10 @@ class Catalog {
     this.init = new Date();
     this.state = "init";
     this.pcount = 0;
-    this.vfile = new VFile({ path: this.source });
+    this.columns = [];
     this.connector = null;
     this.loader = null;
+    this.vfile = new VFile({ path: this.source });
     this.stmt = {
       type: "",
       distinct: false,
@@ -233,20 +234,10 @@ class Catalog {
         "--icsv",
         "--ojson",
         "clean-whitespace",
-        this.source
+        this.source,
+        ">",
+        this.destination
       ]);
-      if (!json.stdout) {
-        throw new Error(`failed to convert ${this.source} from CSV to JSON`);
-      }
-      return json;
-    });
-  }
-  toCSV() {
-    return __async(this, null, function* () {
-      const json = this.exec(mlr, ["--icsv", "--ocsv", "cat", this.source]);
-      if (!json.stdout) {
-        throw new Error(`failed to convert ${this.source} from JSON to CSV`);
-      }
       return json;
     });
   }
@@ -257,17 +248,20 @@ class Catalog {
       if (rowCountExec.code !== 0) {
         throw new Error(`Error while counting rows: ${rowCountExec.stderr}`);
       }
-      if (rowCountExec.stderr) {
+      if (rowCountExec.stderr !== "") {
         throw new Error(rowCountExec.stderr);
       }
-      const r = JSON.parse(rowCountExec.stdout);
-      if (r.length === 0) {
-        throw new Error("No rows found");
+      const rowCount = JSON.parse(rowCountExec.stdout);
+      if (rowCount.length === 0) {
+        throw new Error("Error while counting rows");
       }
-      return r[0].count;
+      if (rowCount[0].count === void 0) {
+        throw new Error("Error while counting rows");
+      }
+      return rowCount[0].count;
     });
   }
-  getColumnHeader() {
+  headerColumn() {
     return __async(this, null, function* () {
       const res = yield this.exec(mlr, [
         "--icsv",
@@ -285,18 +279,16 @@ class Catalog {
       if (columns.length === 0) {
         throw new Error("No columns found");
       }
-      const first = Object.keys(columns[0]);
-      this.vfile.data.columns = first;
+      this.columns = Object.keys(columns[0]);
     });
   }
   preview(count = 20, streamTo) {
     return __async(this, null, function* () {
-      let write;
       if (streamTo === void 0) {
         throw new Error("stream-destination-undefined");
       }
       if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
-        write = fs.createWriteStream(streamTo);
+        const write = fs.createWriteStream(streamTo);
         const previewExec2 = yield this.exec(mlr, [
           "--icsv",
           "--ojson",
@@ -318,7 +310,7 @@ class Catalog {
         this.source
       ]);
       const prev = yield this.promisifyProcessResult(previewExec);
-      if (prev.stderr) {
+      if (prev.stderr !== "") {
         throw new Error(prev.stderr);
       }
       if (prev.code !== 0) {
@@ -328,7 +320,7 @@ class Catalog {
       return JSON.parse(prev.stdout);
     });
   }
-  detectShape() {
+  determineShape() {
     return __async(this, null, function* () {
       const path2 = this.source;
       const shape = {
@@ -360,7 +352,7 @@ class Catalog {
       }
       const mime = this.exec("file", [path2, "--mime-type"]);
       const res = yield this.promisifyProcessResult(mime);
-      if (res.stderr) {
+      if (res.stderr !== "") {
         throw new Error(`failed-to-detect-mime-type: ${res.stderr}`);
       }
       if (res.code !== 0) {
@@ -404,7 +396,7 @@ class Catalog {
         }
         if (count > 0 && count < max) {
           const inlineQuotes = current.split('"').length - 1;
-          if (previous) {
+          if (previous !== "") {
             if (inlineQuotes % 2 !== 0) {
               shape.spanMultipleLines = true;
             }
@@ -457,7 +449,6 @@ class Catalog {
     }
   }
   determineEnv() {
-    this.vfile.data.source = this.source;
     if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
       this.env = "local";
       return;
@@ -469,15 +460,15 @@ class Catalog {
     throw new Error(`invalid-source-type: ${this.source}`);
   }
   fileSize() {
-    const max = 1024 * 1024 * 50;
-    if (!fs.existsSync(this.source)) {
-      throw new Error(`path-doesnt-exists: ${this.source} ,provide a valid path to a CSV file`);
-    }
-    const stat = fs.statSync(this.source);
-    if (stat.size > max) {
-      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to 50MB`);
-    }
-    return stat.size;
+    return __async(this, null, function* () {
+      const max = 50 * 1024 * 1024;
+      const stat = yield fs.promises.stat(this.source);
+      if (stat.size > max) {
+        throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to under 50MB for now`);
+      }
+      this.vfile.data.size = stat.size;
+      return stat.size;
+    });
   }
   uploadToS3() {
     return __async(this, null, function* () {
@@ -491,9 +482,9 @@ class Catalog {
       if (!fStream.readable) {
         throw new Error("failed-to-read-source: Make sure the provided file is readable");
       }
-      const fSize = this.fileSize();
-      if (fSize > 100 * 1024 * 1024) {
-        console.warn(`file size ${fSize} is larger`);
+      const size = yield this.fileSize();
+      if (size > 100 * 1024 * 1024) {
+        console.warn(`file size ${size} is larger`);
       }
       const { data: uri, err } = parseS3Uri(this.destination, {
         file: true
@@ -518,11 +509,11 @@ class Catalog {
       }).finally(() => {
         fStream.close();
       });
-      if (res.$metadata.httpStatusCode !== 200) {
+      if (res.$metadata.httpStatusCode !== void 0 && res.$metadata.httpStatusCode !== 200) {
         throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`);
       }
-      if (!res.$metadata.requestId) {
-        throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`);
+      if (res.$metadata.requestId === void 0) {
+        throw new Error("failed-upload-s3");
       }
       return res.$metadata.requestId;
     });
@@ -540,11 +531,11 @@ class Catalog {
         Key: key
       });
       const result = yield client.send(command);
-      if (result.$metadata.httpStatusCode !== 200) {
-        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId} with status code ${result.$metadata.httpStatusCode}`);
+      if (result.UploadId === void 0 || result.$metadata.httpStatusCode !== 200) {
+        throw new Error("failed-multipart-upload");
       }
-      if (!result.UploadId) {
-        throw new Error(`failed-multipart-upload: Error while creating multipart upload: ${result.UploadId}`);
+      if (result.UploadId === void 0) {
+        throw new Error("failed-multipart-upload");
       }
       return result.UploadId;
     });
@@ -583,20 +574,23 @@ function createCatalog(source, opt) {
   return __async(this, null, function* () {
     return yield new Promise((resolve, reject) => {
       if (source === "") {
-        reject(new Error("failed-to-create-dataset: source is required"));
+        reject(new Error("invalid-source: the source path is required"));
       }
       if (opt.destination === "") {
         reject(new Error("failed-to-create-dataset: destination is required"));
       }
       if (!source.endsWith(".csv")) {
-        reject(new Error(`failed to create dataset: ${source}, source must be a csv file`));
+        reject(new Error(`invalid-file-type: expected a .csv file, ${source} is not`));
       }
       const catalog = new Catalog(source, opt);
       Promise.all([
         catalog.determineEnv(),
-        catalog.detectShape(),
+        catalog.determineShape(),
         catalog.determineConnector(),
-        catalog.determineLoader()
+        catalog.determineLoader(),
+        catalog.headerColumn(),
+        catalog.fileSize(),
+        catalog.rowCount()
       ]).then(() => {
         console.log(`created catalog for ${source}`);
         resolve(catalog);
@@ -650,10 +644,52 @@ class Workflow {
     console.log(`added ${catalog.name} to the workflow`);
     return catalog.name;
   }
+  promisifyProcessResult(child) {
+    return __async(this, null, function* () {
+      const result = {
+        stdout: "",
+        stderr: "",
+        code: 0
+      };
+      return yield new Promise((resolve, reject) => {
+        child.stdout.on("data", (data) => {
+          result.stdout += data;
+        });
+        child.on("close", (code) => {
+          result.code = code === 0 ? 0 : 1;
+          resolve(result);
+        });
+        child.on("error", (err) => {
+          reject(err);
+        });
+      });
+    });
+  }
+  exec(cmd, args) {
+    return __async(this, null, function* () {
+      const run = spawn(cmd, args);
+      const result = {
+        stdout: "",
+        stderr: "",
+        code: 0
+      };
+      return yield new Promise((resolve, reject) => {
+        run.stdout.on("data", (data) => {
+          result.stdout += data;
+        });
+        run.on("close", (code) => {
+          result.code = code === 0 ? 0 : 1;
+          resolve(result);
+        });
+        run.on("error", (err) => {
+          reject(err);
+        });
+      });
+    });
+  }
   query(raw) {
     return __async(this, null, function* () {
       const ast = parseAST(raw);
-      console.log(ast);
       let from = "";
       if (ast.from.length === 1) {
         from = ast.from[0].relname;
@@ -671,8 +707,9 @@ class Workflow {
       }
       if (ast.columns.length > 1) {
         console.log("columns: ", ast.columns.map((c) => c.name).join(", "));
+        const columns = ast.columns.map((c) => c.name).join(",");
+        yield this.exec(mlr, ["--icsv", "--ojson", "cut", "-f", columns, catalog.source, ">", catalog.destination]);
       }
-      console.log(JSON.stringify(ast, null, 2));
     });
   }
 }
