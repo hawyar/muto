@@ -21,7 +21,7 @@
     "build": "node bin/build.js && tsc",
     "dev": "npm run build && npm run test",
     "test": "standard && tap --no-coverage --reporter=specy -J",
-    "fix": "npx ts-standard --fix"
+    "fix": "npx ts-standard --fix && npx standard --fix ./tests/engine.js"
   },
   "ts-standard": {
     "ignore": [

@@ -65,160 +65,6 @@ interface CatalogOptions {
   delimiter: Delimiter
 }
 
-interface Stmt {
-  type: string
-  distinct: boolean
-  columns: any[]
-  from: any[]
-  sort: {}
-  where: {}
-  group: never[]
-  having: never[]
-  limit: {
-    type: string
-    val: string
-  }
-}
-
-function parseAST (raw: string): Stmt {
-  const rawAST = parse(raw)
-
-  // fs.writeFileSync('temp22.json', JSON.stringify(rawAST, null, 2))
-
-  const ast = rawAST[0].RawStmt.stmt.SelectStmt
-
-  const query = {
-    type: 'select',
-    distinct: false,
-    columns: [],
-    from: [],
-    sort: {},
-    where: {},
-    group: [],
-    having: [],
-    order: [],
-    limit: {
-      type: '',
-      val: ''
-    }
-  }
-
-  const limit = ast.limitOption
-
-  if (limit === 'LIMIT_OPTION_DEFAULT') {
-    query.limit = {
-      type: ast.limitOption,
-      val: ''
-    }
-  }
-
-  if (limit === 'LIMIT_OPTION_COUNT' && ast.limitCount !== '') {
-    query.limit = {
-      type: ast.limitOption,
-      val: ast.limitCount.A_Const.val.Integer.ival
-    }
-  }
-
-  if (ast.distinctClause !== undefined) {
-    query.distinct = true
-  }
-
-  if (ast.targetList !== undefined) {
-    query.columns = ast.targetList.map(
-      (t: {
-        ResTarget: { val: { ColumnRef: { fields: any[] } }, name: any }
-      }) => {
-        const col = t.ResTarget.val.ColumnRef.fields[0]
-
-        if (col.A_Star !== undefined) {
-          return {
-            name: '*'
-          }
-        }
-
-        if (t.ResTarget.name !== undefined) {
-          return {
-            as: t.ResTarget.name,
-            name: col.String.str
-          }
-        }
-        return {
-          name: col.String.str
-        }
-      }
-    )
-  }
-
-  query.from = ast.fromClause.map((from: { RangeVar: any }) => {
-    const source = {
-      schemaname: '',
-      relname: '',
-      inh: ''
-    }
-
-    const t = from.RangeVar
-
-    if (t.schemaname !== undefined) {
-      source.schemaname = t.schemaname
-    }
-
-    if (t.relname !== undefined) {
-      source.relname = t.relname
-    }
-
-    if (t.inh !== undefined) {
-      source.inh = t.inh
-    }
-
-    return source
-  })
-
-  // if (ast["sortClause"]) {
-  //     console.log(ast["sortClause"][0].SortBy)
-  // }
-
-  if (ast.whereClause !== undefined) {
-    if (ast.whereClause !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_OP') {
-      const expr = ast.whereClause.A_Expr
-
-      const where = {
-        operator: '',
-        left: {},
-        right: {}
-      }
-
-      where.operator = expr.name[0].String.str
-
-      if (expr.lexpr !== null) {
-        where.left = expr.lexpr.ColumnRef.fields[0].String.str
-      }
-
-      if (expr.rexpr !== null) {
-        where.right = expr.rexpr.ColumnRef.fields[0].String.str
-      }
-      query.where = where
-    }
-
-    if (ast?.whereClause?.A_Expr !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_IN') {
-      const expr = ast.whereClause.A_Expr
-      console.log(expr)
-    }
-
-    if (ast.whereClause.BoolExpr !== null) {
-      if (ast.whereClause.BoolExpr.boolop === 'AND_EXPR') {
-        const args = ast.whereClause.BoolExpr.args
-        console.log(JSON.stringify(args, null, 2))
-      }
-
-      if (ast.whereClause.BoolExpr.boolop === 'OR_EXPR') {
-        const args = ast.whereClause.BoolExpr.args
-        console.log(JSON.stringify(args, null, 2))
-      }
-    }
-  }
-  return query
-}
-
 const credentials = (profile: string): any => {
   return fromIni({
     profile: profile,
@@ -291,8 +137,6 @@ function parseS3Uri (
 
 class Catalog {
   name: string
-  source: string
-  destination: string
   options: CatalogOptions
   init: Date
   env: env
@@ -304,11 +148,9 @@ class Catalog {
   connector: connectorType | null
   loader: loaderType | null
 
-  constructor (source: string, options: CatalogOptions) {
-    this.name = options.name !== '' ? options.name : path.basename(source)
-    this.source = source
+  constructor (options: CatalogOptions) {
+    this.name = options.name !== '' ? options.name : path.basename(options.source)
     this.options = options
-    this.destination = options.destination
     this.env = 'local'
     this.init = new Date()
     this.state = 'init'
@@ -316,15 +158,23 @@ class Catalog {
     this.columns = []
     this.connector = null
     this.loader = null
-    this.vfile = new VFile({ path: this.source })
+    this.vfile = new VFile({ path: this.options.source })
     this.stmt = {
       type: '',
       distinct: false,
-      columns: [],
-      from: [],
+      columns: [{
+        name: '',
+        type: ''
+      }],
+      from: [{
+        schemaname: '',
+        relname: '',
+        inh: ''
+      }],
       sort: [],
       where: {},
       group: [],
+      orderBy: [],
       having: [],
       limit: {
         type: '',
@@ -338,15 +188,15 @@ class Catalog {
       '--icsv',
       '--ojson',
       'clean-whitespace',
-      this.source,
+      this.options.source,
       '>',
-      this.destination
+      this.options.destination
     ])
     return json
   }
 
   async rowCount (): Promise<number> {
-    const count = await this.exec(mlr, ['--ojson', 'count', this.source])
+    const count = await this.exec(mlr, ['--ojson', 'count', this.options.source])
 
     const rowCountExec = await this.promisifyProcessResult(count)
 
@@ -378,7 +228,7 @@ class Catalog {
       'head',
       '-n',
       '1',
-      this.source
+      this.options.source
     ])
 
     const colExec = await this.promisifyProcessResult(res)
@@ -400,7 +250,7 @@ class Catalog {
       throw new Error('stream-destination-undefined')
     }
 
-    if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
+    if (streamTo !== null && streamTo !== this.options.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
       const write = fs.createWriteStream(streamTo)
 
       const previewExec = await this.exec(mlr, [
@@ -409,7 +259,7 @@ class Catalog {
         'head',
         '-n',
         count.toString(),
-        this.source
+        this.options.source
       ])
 
       previewExec.stdout.pipe(write)
@@ -424,7 +274,7 @@ class Catalog {
       'head',
       '-n',
       count.toString(),
-      this.source
+      this.options.source
     ])
 
     const prev = await this.promisifyProcessResult(previewExec)
@@ -442,7 +292,7 @@ class Catalog {
   }
 
   async determineShape (): Promise<void> {
-    const path = this.source
+    const path = this.options.source
     const shape: Shape = {
       type: '',
       size: 0,
@@ -458,28 +308,9 @@ class Catalog {
       preview: []
     }
 
-    if (!fs.existsSync(path)) {
-      throw new Error(
-                `path-doesnt-exists: ${path} ,provide a valid path to a CSV file`
-      )
-    }
-
-    shape.size = fs.statSync(path).size
-
-    if (shape.size > 1024 * 1024 * 1024) {
-      throw new Error(
-                `file-size-exceeds-limit: ${path} is too large, please limit to under 1GB for now`
-      )
-    }
-
-    if (!fs.existsSync(path)) {
-      throw new Error(
-                `${path} does not exist, provide a valid path to a CSV file`
-      )
-    }
+    shape.size = await this.fileSize()
 
     if (os.platform() === 'win32') {
-      // todo
       throw new Error('scream')
     }
 
@@ -529,7 +360,7 @@ class Catalog {
           shape.header = false
         }
 
-        // this ehh too
+        // mehh
         first.row.forEach((r) => {
           if (!isNaN(parseInt(r.substring(0, 3)))) {
             shape.header = false
@@ -578,7 +409,7 @@ class Catalog {
   }
 
   determineLoader (): void {
-    if (this.destination.startsWith('s3://')) {
+    if (this.options.destination.startsWith('s3://')) {
       this.loader = s3Client({
         credentials: credentials('default'),
         region: 'us-east-2'
@@ -587,18 +418,21 @@ class Catalog {
     }
 
     if (
-      this.source.startsWith('/') || this.source.startsWith('../') || this.source.startsWith('./')) {
-      this.loader = fs.createReadStream(this.source)
+      this.options.source.startsWith('/') || this.options.source.startsWith('../') || this.options.source.startsWith('./')) {
+      this.loader = fs.createReadStream(this.options.source)
+      return
     }
+
+    throw new Error('unsupported-loader')
   }
 
   determineConnector (): void {
     switch (this.env) {
       case 'local':
-        if (!fs.existsSync(this.source)) {
-          throw new Error(`file: ${this.source} not found, please provide a valid file path`)
+        if (!fs.existsSync(this.options.source)) {
+          throw new Error(`file: ${this.options.source} not found, please provide a valid file path`)
         }
-        this.connector = fs.createReadStream(this.source)
+        this.connector = fs.createReadStream(this.options.source)
         break
 
       case 'aws':
@@ -609,31 +443,33 @@ class Catalog {
         break
 
       default:
-        throw new Error(`unsupported-source for: ${this.source}`)
+        throw new Error(`unsupported-source for: ${this.options.source}`)
     }
   }
 
   determineEnv (): void {
-    if (this.source.startsWith('/') || this.source.startsWith('../') || this.source.startsWith('./')) {
+    const source = this.options.source
+    if (source.startsWith('/') || source.startsWith('../') || source.startsWith('./')) {
       this.env = 'local'
       return
     }
 
-    if (this.source.startsWith('s3://')) {
+    if (source.startsWith('s3://')) {
       this.env = 'aws'
       return
     }
 
-    throw new Error(`invalid-source-type: ${this.source}`)
+    throw new Error(`invalid-source-type: ${source}`)
   }
 
   async fileSize (): Promise<number> {
+    const source = this.options.source
     const max = 50 * 1024 * 1024
 
-    const stat = await fs.promises.stat(this.source)
+    const stat = await fs.promises.stat(source)
 
     if (stat.size > max) {
-      throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to under 50MB for now`)
+      throw new Error(`file-size-exceeds-limit: ${source} is too large, please limit to under 50MB for now`)
     }
 
     this.vfile.data.size = stat.size
@@ -642,15 +478,18 @@ class Catalog {
   }
 
   async uploadToS3 (): Promise<string> {
-    if (this.source === '') {
+    const source = this.options.source
+    const destination = this.options.destination
+
+    if (source === '') {
       throw new Error('source not definded')
     }
 
-    if (this.destination === '') {
+    if (destination === '') {
       throw new Error('destination not definded')
     }
 
-    const fStream = fs.createReadStream(this.source)
+    const fStream = fs.createReadStream(source)
 
     if (!fStream.readable) {
       throw new Error(
@@ -665,7 +504,7 @@ class Catalog {
       console.warn(`file size ${size} is larger`)
     }
 
-    const { data: uri, err } = parseS3Uri(this.destination, {
+    const { data: uri, err } = parseS3Uri(destination, {
       file: true
     })
 
@@ -674,11 +513,11 @@ class Catalog {
     }
 
     if (uri.file === '') {
-      uri.file = path.basename(this.source)
+      uri.file = path.basename(source)
       console.warn('Destination filename not provided. Using source source basename' + uri.file)
     }
 
-    console.log(`uploading ${this.source} to ${this.destination}`)
+    console.log(`uploading ${source} to ${destination}`)
 
     const s3 = s3Client({
       region: 'us-east-2'
@@ -693,6 +532,7 @@ class Catalog {
         })
       )
       .catch((err) => {
+        /* eslint-disable @typescript-eslint/restrict-template-expressions */
         throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
       })
       .finally(() => {
@@ -758,6 +598,7 @@ class Catalog {
 
     return await new Promise((resolve, reject) => {
       child.stdout.on('data', (data) => {
+        /* eslint-disable @typescript-eslint/restrict-plus-operands */
         result.stdout += data
       })
 
@@ -774,11 +615,10 @@ class Catalog {
 }
 
 export async function createCatalog (
-  source: string,
   opt: CatalogOptions
 ): Promise<Catalog> {
   return await new Promise((resolve, reject) => {
-    if (source === '') {
+    if (opt.source === '' || opt.source === undefined) {
       reject(new Error('invalid-source: the source path is required'))
     }
 
@@ -788,11 +628,11 @@ export async function createCatalog (
       )
     }
 
-    if (!source.endsWith('.csv')) {
-      reject(new Error(`invalid-file-type: expected a .csv file, ${source} is not`))
+    if (!opt.source.endsWith('.csv')) {
+      reject(new Error(`invalid-file-type: expected a .csv file, ${opt.source} is not`))
     }
 
-    const catalog = new Catalog(source, opt)
+    const catalog = new Catalog(opt)
 
     Promise.all([
       catalog.determineEnv(),
@@ -804,7 +644,7 @@ export async function createCatalog (
       catalog.rowCount()
     ])
       .then(() => {
-        console.log(`created catalog for ${source}`)
+        console.log(`created catalog for: ${opt.name}`)
         resolve(catalog)
       })
       .catch((err) => reject(err))
@@ -831,7 +671,7 @@ class Workflow {
   }
 
   remove (dataset: Catalog): void {
-    this.catalogs.delete(dataset.source)
+    this.catalogs.delete(dataset.options.source)
   }
 
   get (source: string): Catalog | undefined {
@@ -882,6 +722,7 @@ class Workflow {
 
     return await new Promise((resolve, reject) => {
       child.stdout.on('data', (data) => {
+        /* eslint-disable @typescript-eslint/restrict-plus-operands */
         result.stdout += data
       })
 
@@ -907,6 +748,7 @@ class Workflow {
 
     return await new Promise((resolve, reject) => {
       run.stdout.on('data', (data) => {
+        /* eslint-disable @typescript-eslint/restrict-plus-operands */
         result.stdout += data
       })
 
@@ -922,16 +764,22 @@ class Workflow {
   }
 
   async query (raw: string): Promise<void> {
-    const ast = parseAST(raw)
-
     let from = ''
-    if (ast.from.length === 1) {
-      from = ast.from[0].relname
+
+    const parsed = new Parser().parse(raw)
+
+    if (parsed.from.length === 1) {
+      from = parsed.from[0].relname
     }
+
+    console.log(`raw query: ${raw}`)
+
+    console.log(JSON.stringify(parsed, null, 2))
 
     if (!this.catalogs.has(from)) {
       throw new Error(`unknown-catalog: ${from}`)
     }
+
     const catalog = this.catalogs.get(from)
 
     if (catalog == null) {
@@ -940,20 +788,226 @@ class Workflow {
 
     console.log(`querying catalog: ${catalog.name}`)
 
-    if (ast.columns[0].name === '*') {
-      console.log('columns: *')
-    }
+    const plan = new Analyzer(catalog, parsed).analyze()
 
-    if (ast.columns.length > 1) {
-      console.log('columns: ', ast.columns.map((c) => c.name).join(', '))
+    console.log(JSON.stringify(plan, null, 2))
 
-      const columns = ast.columns.map((c) => c.name).join(',')
-      await this.exec(mlr, ['--icsv', '--ojson', 'cut', '-f', columns, catalog.source, '>', catalog.destination])
-    }
+    // if (ast.columns[0].name === '*') {
+    //   console.log('columns: *')
+    // }
+
+    // if (ast.columns.length > 1) {
+    //   console.log('columns: ', ast.columns.map((c) => c.name).join(', '))
+    //   // const columns = ast.columns.map((c) => c.name).join(',')
+    //   // await this.exec(mlr, ['--icsv', '--ojson', 'cut', '-f', columns, catalog.source, '>', catalog.destination])
+    // }
+
+    // const queryPlan = new Analyzer().analyze()
+    // console.log(queryPlan)
   }
 }
 
 export function createWorkflow (name: string): Workflow {
   console.log(`created workflow: ${name}`)
   return new Workflow(name)
+}
+
+interface Stmt {
+  type: string
+  distinct: boolean
+  columns: [{
+    name: string
+    type: string
+  }]
+  from: [{
+    schemaname: string
+    relname: string
+    inh: string
+  }]
+  sort: {}
+  where: {}
+  group: string[]
+  having: string[]
+  orderBy: string[]
+  limit: {
+    type: string
+    val: string
+  }
+}
+
+// Parser parses a SQL statement and returns a tree used later in the analyzer
+class Parser {
+  query: string
+  stmt: Stmt
+  constructor () {
+    this.query = ''
+    this.stmt = {
+      type: '',
+      distinct: false,
+      columns: [{
+        name: '',
+        type: ''
+      }],
+      from: [{
+        schemaname: '',
+        relname: '',
+        inh: ''
+      }],
+      sort: {},
+      where: {},
+      group: [],
+      having: [],
+      orderBy: [],
+      limit: {
+        type: '',
+        val: ''
+      }
+    }
+  }
+
+  parse (raw: string): Stmt {
+    if (raw.trim() === '') {
+      throw new Error('invalid-query: no query found')
+    }
+
+    const rawAST = parse(raw)
+
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt
+
+    const limit = ast.limitOption
+
+    if (limit === 'LIMIT_OPTION_DEFAULT') {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ''
+      }
+    }
+
+    if (limit === 'LIMIT_OPTION_COUNT' && ast.limitCount !== '') {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ast.limitCount.A_Const.val.Integer.ival
+      }
+    }
+
+    if (ast.distinctClause !== undefined) {
+      this.stmt.distinct = true
+    }
+
+    if (ast.targetList !== undefined) {
+      this.stmt.columns = ast.targetList.map(
+        (t: {
+          ResTarget: { val: { ColumnRef: { fields: any[] } }, name: any }
+        }) => {
+          const col = t.ResTarget.val.ColumnRef.fields[0]
+
+          if (col.A_Star !== undefined) {
+            return {
+              name: '*'
+            }
+          }
+
+          if (t.ResTarget.name !== undefined) {
+            return {
+              as: t.ResTarget.name,
+              name: col.String.str
+            }
+          }
+          return {
+            name: col.String.str
+          }
+        }
+      )
+    }
+
+    this.stmt.from = ast.fromClause.map((from: { RangeVar: any }) => {
+      const source = {
+        schemaname: '',
+        relname: '',
+        inh: ''
+      }
+
+      const t = from.RangeVar
+
+      if (t.schemaname !== undefined) {
+        source.schemaname = t.schemaname
+      }
+
+      if (t.relname !== undefined) {
+        source.relname = t.relname
+      }
+
+      if (t.inh !== undefined) {
+        source.inh = t.inh
+      }
+
+      return source
+    })
+
+    // if (ast["sortClause"]) {
+    //     console.log(ast["sortClause"][0].SortBy)
+    // }
+
+    if (ast.whereClause !== undefined) {
+      if (ast.whereClause !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_OP') {
+        const expr = ast.whereClause.A_Expr
+
+        const where = {
+          operator: '',
+          left: {},
+          right: {}
+        }
+
+        where.operator = expr.name[0].String.str
+
+        if (expr.lexpr !== null) {
+          where.left = expr.lexpr.ColumnRef.fields[0].String.str
+        }
+
+        if (expr.rexpr !== null) {
+          where.right = expr.rexpr.ColumnRef.fields[0].String.str
+        }
+        this.stmt.where = where
+      }
+
+      if (ast?.whereClause?.A_Expr !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_IN') {
+        const expr = ast.whereClause.A_Expr
+        console.log(expr)
+      }
+
+      if (ast.whereClause.BoolExpr !== null) {
+        if (ast.whereClause.BoolExpr.boolop === 'AND_EXPR') {
+          const args = ast.whereClause.BoolExpr.args
+          console.log(JSON.stringify(args, null, 2))
+        }
+
+        if (ast.whereClause.BoolExpr.boolop === 'OR_EXPR') {
+          const args = ast.whereClause.BoolExpr.args
+          console.log(JSON.stringify(args, null, 2))
+        }
+      }
+    }
+    return this.stmt
+  }
+}
+
+interface ExecutePlan {
+  name: string
+}
+class Analyzer {
+  catalog: Catalog
+  stmt: Stmt
+  plan: ExecutePlan
+  constructor (catalog: Catalog, stmt: Stmt) {
+    this.stmt = stmt
+    this.catalog = catalog
+    this.plan = {
+      name: 'beepboop'
+    }
+  }
+
+  analyze (): ExecutePlan {
+    console.log('analyzing query')
+    return this.plan
+  }
 }

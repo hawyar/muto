@@ -6,18 +6,24 @@
 
 ![Tests](https://github.com/hawyar/muto/actions/workflows/test.yml/badge.svg)
 
-### usage
+## Usage
 
-Install package
+**Note**: This package is not on npm yet. For now clone the repo and build it.
+
 ```bash
-npm i muto
+git clone https://github.com/hawyar/muto.git
 ```
+
+Install dependencies and build muto
+```bash
+cd muto && npm i && npm run build
+```
+
 
 ```javascript
 const { createWorkflow } = require("muto")
 
 const source = path.join(dirname, 'example', 'albums.csv')
-
 
 const workflow = await createWorkflow("path/to/file.csv", {
   name: 'albums',

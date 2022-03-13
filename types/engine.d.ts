@@ -30,24 +30,8 @@ interface CatalogOptions {
     output: 'csv' | 'json';
     delimiter: Delimiter;
 }
-interface Stmt {
-    type: string;
-    distinct: boolean;
-    columns: any[];
-    from: any[];
-    sort: {};
-    where: {};
-    group: never[];
-    having: never[];
-    limit: {
-        type: string;
-        val: string;
-    };
-}
 declare class Catalog {
     name: string;
-    source: string;
-    destination: string;
     options: CatalogOptions;
     init: Date;
     env: env;
@@ -58,7 +42,7 @@ declare class Catalog {
     stmt: Stmt;
     connector: connectorType | null;
     loader: loaderType | null;
-    constructor(source: string, options: CatalogOptions);
+    constructor(options: CatalogOptions);
     toJson(): Promise<ChildProcessWithoutNullStreams>;
     rowCount(): Promise<number>;
     headerColumn(): Promise<void>;
@@ -73,7 +57,7 @@ declare class Catalog {
     exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams;
     promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult>;
 }
-export declare function createCatalog(source: string, opt: CatalogOptions): Promise<Catalog>;
+export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;
 declare class Workflow {
     name: string;
     catalogs: Map<string, Catalog>;
@@ -90,4 +74,30 @@ declare class Workflow {
     query(raw: string): Promise<void>;
 }
 export declare function createWorkflow(name: string): Workflow;
+interface Stmt {
+    type: string;
+    distinct: boolean;
+    columns: [
+        {
+            name: string;
+            type: string;
+        }
+    ];
+    from: [
+        {
+            schemaname: string;
+            relname: string;
+            inh: string;
+        }
+    ];
+    sort: {};
+    where: {};
+    group: string[];
+    having: string[];
+    orderBy: string[];
+    limit: {
+        type: string;
+        val: string;
+    };
+}
 export {};

@@ -41,112 +41,6 @@ var Delimiter = /* @__PURE__ */ ((Delimiter2) => {
   Delimiter2["COLON"] = ":";
   return Delimiter2;
 })(Delimiter || {});
-function parseAST(raw) {
-  var _a, _b, _c;
-  const rawAST = parse(raw);
-  const ast = rawAST[0].RawStmt.stmt.SelectStmt;
-  const query = {
-    type: "select",
-    distinct: false,
-    columns: [],
-    from: [],
-    sort: {},
-    where: {},
-    group: [],
-    having: [],
-    order: [],
-    limit: {
-      type: "",
-      val: ""
-    }
-  };
-  const limit = ast.limitOption;
-  if (limit === "LIMIT_OPTION_DEFAULT") {
-    query.limit = {
-      type: ast.limitOption,
-      val: ""
-    };
-  }
-  if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
-    query.limit = {
-      type: ast.limitOption,
-      val: ast.limitCount.A_Const.val.Integer.ival
-    };
-  }
-  if (ast.distinctClause !== void 0) {
-    query.distinct = true;
-  }
-  if (ast.targetList !== void 0) {
-    query.columns = ast.targetList.map((t) => {
-      const col = t.ResTarget.val.ColumnRef.fields[0];
-      if (col.A_Star !== void 0) {
-        return {
-          name: "*"
-        };
-      }
-      if (t.ResTarget.name !== void 0) {
-        return {
-          as: t.ResTarget.name,
-          name: col.String.str
-        };
-      }
-      return {
-        name: col.String.str
-      };
-    });
-  }
-  query.from = ast.fromClause.map((from) => {
-    const source = {
-      schemaname: "",
-      relname: "",
-      inh: ""
-    };
-    const t = from.RangeVar;
-    if (t.schemaname !== void 0) {
-      source.schemaname = t.schemaname;
-    }
-    if (t.relname !== void 0) {
-      source.relname = t.relname;
-    }
-    if (t.inh !== void 0) {
-      source.inh = t.inh;
-    }
-    return source;
-  });
-  if (ast.whereClause !== void 0) {
-    if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
-      const expr = ast.whereClause.A_Expr;
-      const where = {
-        operator: "",
-        left: {},
-        right: {}
-      };
-      where.operator = expr.name[0].String.str;
-      if (expr.lexpr !== null) {
-        where.left = expr.lexpr.ColumnRef.fields[0].String.str;
-      }
-      if (expr.rexpr !== null) {
-        where.right = expr.rexpr.ColumnRef.fields[0].String.str;
-      }
-      query.where = where;
-    }
-    if (((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr) !== null && ((_c = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _c.A_Expr.kind) === "AEXPR_IN") {
-      const expr = ast.whereClause.A_Expr;
-      console.log(expr);
-    }
-    if (ast.whereClause.BoolExpr !== null) {
-      if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
-        const args = ast.whereClause.BoolExpr.args;
-        console.log(JSON.stringify(args, null, 2));
-      }
-      if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
-        const args = ast.whereClause.BoolExpr.args;
-        console.log(JSON.stringify(args, null, 2));
-      }
-    }
-  }
-  return query;
-}
 const credentials = (profile) => {
   return fromIni({
     profile,
@@ -200,11 +94,9 @@ function parseS3Uri(uri, options) {
   };
 }
 class Catalog {
-  constructor(source, options) {
-    this.name = options.name !== "" ? options.name : path.basename(source);
-    this.source = source;
+  constructor(options) {
+    this.name = options.name !== "" ? options.name : path.basename(options.source);
     this.options = options;
-    this.destination = options.destination;
     this.env = "local";
     this.init = new Date();
     this.state = "init";
@@ -212,15 +104,23 @@ class Catalog {
     this.columns = [];
     this.connector = null;
     this.loader = null;
-    this.vfile = new VFile({ path: this.source });
+    this.vfile = new VFile({ path: this.options.source });
     this.stmt = {
       type: "",
       distinct: false,
-      columns: [],
-      from: [],
+      columns: [{
+        name: "",
+        type: ""
+      }],
+      from: [{
+        schemaname: "",
+        relname: "",
+        inh: ""
+      }],
       sort: [],
       where: {},
       group: [],
+      orderBy: [],
       having: [],
       limit: {
         type: "",
@@ -234,16 +134,16 @@ class Catalog {
         "--icsv",
         "--ojson",
         "clean-whitespace",
-        this.source,
+        this.options.source,
         ">",
-        this.destination
+        this.options.destination
       ]);
       return json;
     });
   }
   rowCount() {
     return __async(this, null, function* () {
-      const count = yield this.exec(mlr, ["--ojson", "count", this.source]);
+      const count = yield this.exec(mlr, ["--ojson", "count", this.options.source]);
       const rowCountExec = yield this.promisifyProcessResult(count);
       if (rowCountExec.code !== 0) {
         throw new Error(`Error while counting rows: ${rowCountExec.stderr}`);
@@ -269,7 +169,7 @@ class Catalog {
         "head",
         "-n",
         "1",
-        this.source
+        this.options.source
       ]);
       const colExec = yield this.promisifyProcessResult(res);
       if (colExec.code !== 0) {
@@ -287,7 +187,7 @@ class Catalog {
       if (streamTo === void 0) {
         throw new Error("stream-destination-undefined");
       }
-      if (streamTo !== null && streamTo !== this.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
+      if (streamTo !== null && streamTo !== this.options.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
         const write = fs.createWriteStream(streamTo);
         const previewExec2 = yield this.exec(mlr, [
           "--icsv",
@@ -295,7 +195,7 @@ class Catalog {
           "head",
           "-n",
           count.toString(),
-          this.source
+          this.options.source
         ]);
         previewExec2.stdout.pipe(write);
         console.warn(`preview saved to: ${streamTo}`);
@@ -307,7 +207,7 @@ class Catalog {
         "head",
         "-n",
         count.toString(),
-        this.source
+        this.options.source
       ]);
       const prev = yield this.promisifyProcessResult(previewExec);
       if (prev.stderr !== "") {
@@ -322,7 +222,7 @@ class Catalog {
   }
   determineShape() {
     return __async(this, null, function* () {
-      const path2 = this.source;
+      const path2 = this.options.source;
       const shape = {
         type: "",
         size: 0,
@@ -337,16 +237,7 @@ class Catalog {
         warnings: {},
         preview: []
       };
-      if (!fs.existsSync(path2)) {
-        throw new Error(`path-doesnt-exists: ${path2} ,provide a valid path to a CSV file`);
-      }
-      shape.size = fs.statSync(path2).size;
-      if (shape.size > 1024 * 1024 * 1024) {
-        throw new Error(`file-size-exceeds-limit: ${path2} is too large, please limit to under 1GB for now`);
-      }
-      if (!fs.existsSync(path2)) {
-        throw new Error(`${path2} does not exist, provide a valid path to a CSV file`);
-      }
+      shape.size = yield this.fileSize();
       if (os.platform() === "win32") {
         throw new Error("scream");
       }
@@ -419,24 +310,26 @@ class Catalog {
     });
   }
   determineLoader() {
-    if (this.destination.startsWith("s3://")) {
+    if (this.options.destination.startsWith("s3://")) {
       this.loader = s3Client({
         credentials: credentials("default"),
         region: "us-east-2"
       });
       return;
     }
-    if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
-      this.loader = fs.createReadStream(this.source);
+    if (this.options.source.startsWith("/") || this.options.source.startsWith("../") || this.options.source.startsWith("./")) {
+      this.loader = fs.createReadStream(this.options.source);
+      return;
     }
+    throw new Error("unsupported-loader");
   }
   determineConnector() {
     switch (this.env) {
       case "local":
-        if (!fs.existsSync(this.source)) {
-          throw new Error(`file: ${this.source} not found, please provide a valid file path`);
+        if (!fs.existsSync(this.options.source)) {
+          throw new Error(`file: ${this.options.source} not found, please provide a valid file path`);
         }
-        this.connector = fs.createReadStream(this.source);
+        this.connector = fs.createReadStream(this.options.source);
         break;
       case "aws":
         this.connector = s3Client({
@@ -445,26 +338,28 @@ class Catalog {
         });
         break;
       default:
-        throw new Error(`unsupported-source for: ${this.source}`);
+        throw new Error(`unsupported-source for: ${this.options.source}`);
     }
   }
   determineEnv() {
-    if (this.source.startsWith("/") || this.source.startsWith("../") || this.source.startsWith("./")) {
+    const source = this.options.source;
+    if (source.startsWith("/") || source.startsWith("../") || source.startsWith("./")) {
       this.env = "local";
       return;
     }
-    if (this.source.startsWith("s3://")) {
+    if (source.startsWith("s3://")) {
       this.env = "aws";
       return;
     }
-    throw new Error(`invalid-source-type: ${this.source}`);
+    throw new Error(`invalid-source-type: ${source}`);
   }
   fileSize() {
     return __async(this, null, function* () {
+      const source = this.options.source;
       const max = 50 * 1024 * 1024;
-      const stat = yield fs.promises.stat(this.source);
+      const stat = yield fs.promises.stat(source);
       if (stat.size > max) {
-        throw new Error(`file-size-exceeds-limit: ${this.source} is too large, please limit to under 50MB for now`);
+        throw new Error(`file-size-exceeds-limit: ${source} is too large, please limit to under 50MB for now`);
       }
       this.vfile.data.size = stat.size;
       return stat.size;
@@ -472,13 +367,15 @@ class Catalog {
   }
   uploadToS3() {
     return __async(this, null, function* () {
-      if (this.source === "") {
+      const source = this.options.source;
+      const destination = this.options.destination;
+      if (source === "") {
         throw new Error("source not definded");
       }
-      if (this.destination === "") {
+      if (destination === "") {
         throw new Error("destination not definded");
       }
-      const fStream = fs.createReadStream(this.source);
+      const fStream = fs.createReadStream(source);
       if (!fStream.readable) {
         throw new Error("failed-to-read-source: Make sure the provided file is readable");
       }
@@ -486,17 +383,17 @@ class Catalog {
       if (size > 100 * 1024 * 1024) {
         console.warn(`file size ${size} is larger`);
       }
-      const { data: uri, err } = parseS3Uri(this.destination, {
+      const { data: uri, err } = parseS3Uri(destination, {
         file: true
       });
       if (err.toString().startsWith("invalid-s3-uri")) {
         throw new Error(`failed-to-parse-s3-uri: ${err}`);
       }
       if (uri.file === "") {
-        uri.file = path.basename(this.source);
+        uri.file = path.basename(source);
         console.warn("Destination filename not provided. Using source source basename" + uri.file);
       }
-      console.log(`uploading ${this.source} to ${this.destination}`);
+      console.log(`uploading ${source} to ${destination}`);
       const s3 = s3Client({
         region: "us-east-2"
       });
@@ -570,19 +467,19 @@ class Catalog {
     });
   }
 }
-function createCatalog(source, opt) {
+function createCatalog(opt) {
   return __async(this, null, function* () {
     return yield new Promise((resolve, reject) => {
-      if (source === "") {
+      if (opt.source === "" || opt.source === void 0) {
         reject(new Error("invalid-source: the source path is required"));
       }
       if (opt.destination === "") {
         reject(new Error("failed-to-create-dataset: destination is required"));
       }
-      if (!source.endsWith(".csv")) {
-        reject(new Error(`invalid-file-type: expected a .csv file, ${source} is not`));
+      if (!opt.source.endsWith(".csv")) {
+        reject(new Error(`invalid-file-type: expected a .csv file, ${opt.source} is not`));
       }
-      const catalog = new Catalog(source, opt);
+      const catalog = new Catalog(opt);
       Promise.all([
         catalog.determineEnv(),
         catalog.determineShape(),
@@ -592,7 +489,7 @@ function createCatalog(source, opt) {
         catalog.fileSize(),
         catalog.rowCount()
       ]).then(() => {
-        console.log(`created catalog for ${source}`);
+        console.log(`created catalog for: ${opt.name}`);
         resolve(catalog);
       }).catch((err) => reject(err));
     });
@@ -610,7 +507,7 @@ class Workflow {
     return Array.from(this.catalogs.values());
   }
   remove(dataset) {
-    this.catalogs.delete(dataset.source);
+    this.catalogs.delete(dataset.options.source);
   }
   get(source) {
     if (this.catalogs.get(source) != null) {
@@ -689,11 +586,13 @@ class Workflow {
   }
   query(raw) {
     return __async(this, null, function* () {
-      const ast = parseAST(raw);
       let from = "";
-      if (ast.from.length === 1) {
-        from = ast.from[0].relname;
+      const parsed = new Parser().parse(raw);
+      if (parsed.from.length === 1) {
+        from = parsed.from[0].relname;
       }
+      console.log(`raw query: ${raw}`);
+      console.log(JSON.stringify(parsed, null, 2));
       if (!this.catalogs.has(from)) {
         throw new Error(`unknown-catalog: ${from}`);
       }
@@ -702,20 +601,148 @@ class Workflow {
         throw new Error(`catalog-not-found: ${from}`);
       }
       console.log(`querying catalog: ${catalog.name}`);
-      if (ast.columns[0].name === "*") {
-        console.log("columns: *");
-      }
-      if (ast.columns.length > 1) {
-        console.log("columns: ", ast.columns.map((c) => c.name).join(", "));
-        const columns = ast.columns.map((c) => c.name).join(",");
-        yield this.exec(mlr, ["--icsv", "--ojson", "cut", "-f", columns, catalog.source, ">", catalog.destination]);
-      }
+      const plan = new Analyzer(catalog, parsed).analyze();
+      console.log(JSON.stringify(plan, null, 2));
     });
   }
 }
 function createWorkflow(name) {
   console.log(`created workflow: ${name}`);
   return new Workflow(name);
+}
+class Parser {
+  constructor() {
+    this.query = "";
+    this.stmt = {
+      type: "",
+      distinct: false,
+      columns: [{
+        name: "",
+        type: ""
+      }],
+      from: [{
+        schemaname: "",
+        relname: "",
+        inh: ""
+      }],
+      sort: {},
+      where: {},
+      group: [],
+      having: [],
+      orderBy: [],
+      limit: {
+        type: "",
+        val: ""
+      }
+    };
+  }
+  parse(raw) {
+    var _a, _b, _c;
+    if (raw.trim() === "") {
+      throw new Error("invalid-query: no query found");
+    }
+    const rawAST = parse(raw);
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt;
+    const limit = ast.limitOption;
+    if (limit === "LIMIT_OPTION_DEFAULT") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ""
+      };
+    }
+    if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ast.limitCount.A_Const.val.Integer.ival
+      };
+    }
+    if (ast.distinctClause !== void 0) {
+      this.stmt.distinct = true;
+    }
+    if (ast.targetList !== void 0) {
+      this.stmt.columns = ast.targetList.map((t) => {
+        const col = t.ResTarget.val.ColumnRef.fields[0];
+        if (col.A_Star !== void 0) {
+          return {
+            name: "*"
+          };
+        }
+        if (t.ResTarget.name !== void 0) {
+          return {
+            as: t.ResTarget.name,
+            name: col.String.str
+          };
+        }
+        return {
+          name: col.String.str
+        };
+      });
+    }
+    this.stmt.from = ast.fromClause.map((from) => {
+      const source = {
+        schemaname: "",
+        relname: "",
+        inh: ""
+      };
+      const t = from.RangeVar;
+      if (t.schemaname !== void 0) {
+        source.schemaname = t.schemaname;
+      }
+      if (t.relname !== void 0) {
+        source.relname = t.relname;
+      }
+      if (t.inh !== void 0) {
+        source.inh = t.inh;
+      }
+      return source;
+    });
+    if (ast.whereClause !== void 0) {
+      if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
+        const expr = ast.whereClause.A_Expr;
+        const where = {
+          operator: "",
+          left: {},
+          right: {}
+        };
+        where.operator = expr.name[0].String.str;
+        if (expr.lexpr !== null) {
+          where.left = expr.lexpr.ColumnRef.fields[0].String.str;
+        }
+        if (expr.rexpr !== null) {
+          where.right = expr.rexpr.ColumnRef.fields[0].String.str;
+        }
+        this.stmt.where = where;
+      }
+      if (((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr) !== null && ((_c = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _c.A_Expr.kind) === "AEXPR_IN") {
+        const expr = ast.whereClause.A_Expr;
+        console.log(expr);
+      }
+      if (ast.whereClause.BoolExpr !== null) {
+        if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
+          const args = ast.whereClause.BoolExpr.args;
+          console.log(JSON.stringify(args, null, 2));
+        }
+        if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
+          const args = ast.whereClause.BoolExpr.args;
+          console.log(JSON.stringify(args, null, 2));
+        }
+      }
+    }
+    return this.stmt;
+  }
+}
+class Analyzer {
+  constructor(catalog, stmt) {
+    this.stmt = stmt;
+    this.catalog = catalog;
+    this.plan = {
+      name: "beepboop"
+    };
+  }
+  analyze() {
+    console.log("analyzing query");
+    return this.plan;
+  }
 }
 export {
   createCatalog,
