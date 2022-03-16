@@ -1,17 +1,11 @@
 /// <reference types="node" />
 import fs from 'fs';
-import { ChildProcessWithoutNullStreams } from 'child_process';
 import { VFile } from 'vfile';
 import { S3Client } from '@aws-sdk/client-s3';
 declare type env = 'local' | 'aws';
-declare type connectorType = S3Client | fs.ReadStream;
+declare type connectorType = S3Client | fs.WriteStream;
 declare type loaderType = S3Client | fs.ReadStream;
 declare type catalogStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready';
-interface ProcessResult {
-    stdout: string;
-    stderr: string;
-    code: number;
-}
 declare enum Delimiter {
     COMMA = ",",
     TAB = "\t",
@@ -22,6 +16,7 @@ declare enum Delimiter {
 }
 interface CatalogOptions {
     name: string;
+    input: 'csv';
     source: string;
     destination: string;
     columns: string[];
@@ -43,10 +38,10 @@ declare class Catalog {
     connector: connectorType | null;
     loader: loaderType | null;
     constructor(options: CatalogOptions);
-    toJson(): Promise<ChildProcessWithoutNullStreams>;
     rowCount(): Promise<number>;
     headerColumn(): Promise<void>;
     preview(count?: number, streamTo?: string): Promise<string[][] | string>;
+    fileType(): Promise<string>;
     determineShape(): Promise<void>;
     determineLoader(): void;
     determineConnector(): void;
@@ -54,26 +49,8 @@ declare class Catalog {
     fileSize(): Promise<number>;
     uploadToS3(): Promise<string>;
     initMultipartUpload(bucket: string, key: string): Promise<string>;
-    exec(cmd: string, args: string[]): ChildProcessWithoutNullStreams;
-    promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult>;
 }
 export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;
-declare class Workflow {
-    name: string;
-    catalogs: Map<string, Catalog>;
-    createdAt: Date;
-    env: env;
-    stmt: string;
-    constructor(name: string);
-    list(): Catalog[];
-    remove(dataset: Catalog): void;
-    get(source: string): Catalog | undefined;
-    add(catalog: Catalog | [Catalog]): string | string[];
-    promisifyProcessResult(child: ChildProcessWithoutNullStreams): Promise<ProcessResult>;
-    exec(cmd: string, args: string[]): Promise<ProcessResult>;
-    query(raw: string): Promise<void>;
-}
-export declare function createWorkflow(name: string): Workflow;
 interface Stmt {
     type: string;
     distinct: boolean;
@@ -100,4 +77,18 @@ interface Stmt {
         val: string;
     };
 }
+declare class Workflow {
+    name: string;
+    catalogs: Map<string, Catalog>;
+    createdAt: Date;
+    env: env;
+    stmt: string;
+    constructor(name: string);
+    list(): Catalog[];
+    remove(dataset: Catalog): void;
+    get(source: string): Catalog | undefined;
+    add(catalog: Catalog | [Catalog]): string | string[];
+    query(raw: string): Promise<void>;
+}
+export declare function createWorkflow(name: string): Workflow;
 export {};

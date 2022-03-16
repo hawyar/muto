@@ -12,7 +12,7 @@
   "exports": {
     ".": {
       "import": "./dist/muto.mjs",
-      "require": "./dist/muto.js"
+      "require": "./dist/muto.cjs"
     }
   },
   "types": "types/muto.d.ts",

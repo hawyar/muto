@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process'
+import { spawn } from 'child_process'
 import os from 'os'
 import path, { join } from 'path'
 import { VFile } from 'vfile'
@@ -16,10 +16,11 @@ import {
 } from '@aws-sdk/client-s3'
 import { fromIni } from '@aws-sdk/credential-providers'
 
-const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
+const mlr = join(process.cwd(), 'node_modules', 'muto', 'node_modules', '.bin', 'mlr@v6.0.0')
+// const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 type env = 'local' | 'aws'
- type connectorType = S3Client | fs.ReadStream
+ type connectorType = S3Client | fs.WriteStream
  type loaderType = S3Client | fs.ReadStream
 
 type catalogStateType = | 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
@@ -56,6 +57,7 @@ enum Delimiter {
 
 interface CatalogOptions {
   name: string
+  input: 'csv'
   source: string
   destination: string
   columns: string[]
@@ -135,6 +137,38 @@ function parseS3Uri (
   }
 }
 
+async function exec (cmd: string, args: string[]): Promise<ProcessResult> {
+  console.log(`${cmd} ${args.join(' ')}`)
+  const run = spawn(cmd, args)
+
+  const result: ProcessResult = {
+    stdout: '',
+    stderr: '',
+    code: 0
+  }
+
+  return await new Promise((resolve, reject) => {
+    run.stdout.on('data', (data) => {
+      /* eslint-disable @typescript-eslint/restrict-plus-operands */
+      result.stdout += data
+    })
+
+    run.stderr.on('data', (data) => {
+      throw new Error(data.toString())
+    })
+
+    run.on('close', (code) => {
+      result.code = code === 0 ? 0 : 1
+      resolve(result)
+    })
+
+    run.on('error', (err) => {
+      console.log(JSON.stringify(err))
+      reject(err)
+    })
+  })
+}
+
 class Catalog {
   name: string
   options: CatalogOptions
@@ -183,32 +217,35 @@ class Catalog {
     }
   }
 
-  async toJson (): Promise<ChildProcessWithoutNullStreams> {
-    const json = this.exec(mlr, [
-      '--icsv',
-      '--ojson',
-      'clean-whitespace',
-      this.options.source,
-      '>',
-      this.options.destination
-    ])
-    return json
-  }
+  // async toJson (): Promise<ChildProcessWithoutNullStreams> {
+  //   const json = await exec(mlr, [
+  //     '--icsv',
+  //     '--ojson',
+  //     'clean-whitespace',
+  //     this.options.source,
+  //     '>',
+  //     this.options.destination
+  //   ])
+
+  //   if (json.code !== 0) {
+  //     throw new Error(`mlr-error: ${json.stderr}`)
+  //   }
+
+  //   return json.stdout
+  // }
 
   async rowCount (): Promise<number> {
-    const count = await this.exec(mlr, ['--ojson', 'count', this.options.source])
+    const count = await exec(mlr, ['--ojson', 'count', this.options.source])
 
-    const rowCountExec = await this.promisifyProcessResult(count)
-
-    if (rowCountExec.code !== 0) {
-      throw new Error(`Error while counting rows: ${rowCountExec.stderr}`)
+    if (count.code !== 0) {
+      throw new Error(`Error while counting rows: ${count.stderr}`)
     }
 
-    if (rowCountExec.stderr !== '') {
-      throw new Error(rowCountExec.stderr)
+    if (count.stderr !== '') {
+      throw new Error(count.stderr)
     }
 
-    const rowCount = JSON.parse(rowCountExec.stdout)
+    const rowCount = JSON.parse(count.stdout)
 
     if (rowCount.length === 0) {
       throw new Error('Error while counting rows')
@@ -222,7 +259,7 @@ class Catalog {
   }
 
   async headerColumn (): Promise<void> {
-    const res = await this.exec(mlr, [
+    const res = await exec(mlr, [
       '--icsv',
       '--ojson',
       'head',
@@ -231,13 +268,11 @@ class Catalog {
       this.options.source
     ])
 
-    const colExec = await this.promisifyProcessResult(res)
-
-    if (colExec.code !== 0) {
-      throw new Error(`Error while getting column header: ${colExec.stderr}`)
+    if (res.code !== 0) {
+      throw new Error(`Error while getting column header: ${res.stderr}`)
     }
 
-    const columns = JSON.parse(colExec.stdout)
+    const columns = JSON.parse(res.stdout)
 
     if (columns.length === 0) {
       throw new Error('No columns found')
@@ -250,25 +285,25 @@ class Catalog {
       throw new Error('stream-destination-undefined')
     }
 
-    if (streamTo !== null && streamTo !== this.options.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
-      const write = fs.createWriteStream(streamTo)
+    // if (streamTo !== null && streamTo !== this.options.source && fs.createWriteStream(streamTo) instanceof fs.WriteStream) {
+    //   const write = fs.createWriteStream(streamTo)
 
-      const previewExec = await this.exec(mlr, [
-        '--icsv',
-        '--ojson',
-        'head',
-        '-n',
-        count.toString(),
-        this.options.source
-      ])
+    //   const previewExec = await spawn(mlr, [
+    //     '--icsv',
+    //     '--ojson',
+    //     'head',
+    //     '-n',
+    //     count.toString(),
+    //     this.options.source
+    //   ])
 
-      previewExec.stdout.pipe(write)
+    //   previewExec.stdout.pipe(write)
 
-      console.warn(`preview saved to: ${streamTo}`)
-      return streamTo
-    }
+    //   console.warn(`preview saved to: ${streamTo}`)
+    //   return streamTo
+    // }
 
-    const previewExec = await this.exec(mlr, [
+    const previous = await exec(mlr, [
       '--icsv',
       '--ojson',
       'head',
@@ -277,18 +312,40 @@ class Catalog {
       this.options.source
     ])
 
-    const prev = await this.promisifyProcessResult(previewExec)
-
-    if (prev.stderr !== '') {
-      throw new Error(prev.stderr)
+    if (previous.stderr !== '') {
+      throw new Error(previous.stderr)
     }
 
-    if (prev.code !== 0) {
+    if (previous.code !== 0) {
       throw new Error('Error while executing mlr command')
     }
 
-    this.vfile.data.preview = JSON.parse(prev.stdout)
-    return JSON.parse(prev.stdout)
+    this.vfile.data.preview = JSON.parse(previous.stdout)
+    return JSON.parse(previous.stdout)
+  }
+
+  async fileType (): Promise<string> {
+    if (os.platform() !== 'linux' && os.platform() !== 'darwin') {
+      throw new Error('scream')
+    }
+
+    const mime = await exec('file', [this.options.source, '--mime-type'])
+
+    if (mime.stderr !== '') {
+      throw new Error(`failed-to-detect-mime-type: ${mime.stderr}`)
+    }
+
+    if (mime.code !== 0) {
+      throw new Error(`failed-to-detect-mime-type: ${mime.stderr}`)
+    }
+
+    const type = mime.stdout.split(':')[1].trim()
+
+    if (type === '') {
+      throw new Error('failed-to-detect-mime-type')
+    }
+
+    return type
   }
 
   async determineShape (): Promise<void> {
@@ -310,23 +367,7 @@ class Catalog {
 
     shape.size = await this.fileSize()
 
-    if (os.platform() === 'win32') {
-      throw new Error('scream')
-    }
-
-    const mime = this.exec('file', [path, '--mime-type'])
-
-    const res = await this.promisifyProcessResult(mime)
-
-    if (res.stderr !== '') {
-      throw new Error(`failed-to-detect-mime-type: ${res.stderr}`)
-    }
-
-    if (res.code !== 0) {
-      throw new Error(`failed-to-detect-mime-type: ${res.stderr}`)
-    }
-
-    shape.type = res.stdout.split(':')[1].trim()
+    shape.type = await this.fileType()
 
     const readLine = createInterface({
       input: fs.createReadStream(path),
@@ -334,7 +375,7 @@ class Catalog {
     })
 
     let count = 0
-    const max = 20
+    const max = 10
 
     const first = {
       row: [''],
@@ -373,7 +414,7 @@ class Catalog {
         shape.columns = first.row
       }
 
-      if (count > 0 && count < max) {
+      if (count > 0 && count < max + 1) {
         // there is a chance the record spans next line
         const inlineQuotes = current.split('"').length - 1
 
@@ -384,7 +425,10 @@ class Catalog {
           }
         }
 
-        // if odd number of quotes and consider escaped quotes such as: "aaa","b""bb","ccc"
+        console.log(inlineQuotes)
+        console.log(current.split('"'))
+
+        // check for : "aaa","b""bb","ccc"
         if (
           inlineQuotes % 2 !== 0 &&
                     current.split('""').length - 1 !== 1
@@ -432,7 +476,7 @@ class Catalog {
         if (!fs.existsSync(this.options.source)) {
           throw new Error(`file: ${this.options.source} not found, please provide a valid file path`)
         }
-        this.connector = fs.createReadStream(this.options.source)
+        this.connector = fs.createWriteStream(this.options.destination)
         break
 
       case 'aws':
@@ -464,15 +508,13 @@ class Catalog {
 
   async fileSize (): Promise<number> {
     const source = this.options.source
-    const max = 50 * 1024 * 1024
+    // const max = 50 * 1024 * 1024
 
     const stat = await fs.promises.stat(source)
 
-    if (stat.size > max) {
-      throw new Error(`file-size-exceeds-limit: ${source} is too large, please limit to under 50MB for now`)
-    }
-
-    this.vfile.data.size = stat.size
+    // if (stat.size > max) {
+    //   throw new Error(`file-size-exceeds-limit: ${source} is too large, please limit to under 50MB for now`)
+    // }
 
     return stat.size
   }
@@ -575,43 +617,6 @@ class Catalog {
 
     return result.UploadId
   }
-
-  exec (cmd: string, args: string[]): ChildProcessWithoutNullStreams {
-    console.log(`exec: ${cmd} ${args.join(' ')}`)
-
-    if (this.pcount > 5) {
-      throw new Error(`too-many-processes: ${this.pcount}`)
-    }
-
-    this.pcount++
-    return spawn(cmd, args, {})
-  }
-
-  async promisifyProcessResult (
-    child: ChildProcessWithoutNullStreams
-  ): Promise<ProcessResult> {
-    const result: ProcessResult = {
-      stdout: '',
-      stderr: '',
-      code: 0
-    }
-
-    return await new Promise((resolve, reject) => {
-      child.stdout.on('data', (data) => {
-        /* eslint-disable @typescript-eslint/restrict-plus-operands */
-        result.stdout += data
-      })
-
-      child.on('close', (code) => {
-        result.code = code === 0 ? 0 : 1
-        resolve(result)
-      })
-
-      child.on('error', (err) => {
-        reject(err)
-      })
-    })
-  }
 }
 
 export async function createCatalog (
@@ -651,167 +656,6 @@ export async function createCatalog (
   })
 }
 
-class Workflow {
-  name: string
-  catalogs: Map<string, Catalog>
-  createdAt: Date
-  env: env
-  stmt: string
-
-  constructor (name: string) {
-    this.name = name
-    this.catalogs = new Map()
-    this.createdAt = new Date()
-    this.env = 'local'
-    this.stmt = ''
-  }
-
-  list (): Catalog[] {
-    return Array.from(this.catalogs.values())
-  }
-
-  remove (dataset: Catalog): void {
-    this.catalogs.delete(dataset.options.source)
-  }
-
-  get (source: string): Catalog | undefined {
-    if (this.catalogs.get(source) != null) {
-      return this.catalogs.get(source)
-    }
-    return undefined
-  }
-
-  add (catalog: Catalog | [Catalog]): string | string[] {
-    if (Array.isArray(catalog)) {
-      if (catalog.length === 1 && catalog[0].name !== '') {
-        const c = catalog[0]
-        if (this.catalogs.has(c.name)) {
-          throw new Error(`duplicate-dataset: ${c.name}`)
-        }
-        this.catalogs.set(c.name, c)
-        return c.name
-      }
-
-      catalog.forEach((c) => {
-        if (this.catalogs.has(c.name)) {
-          throw new Error(`duplicate-dataset: ${c.name}`)
-        }
-        console.log(`added ${c.name} to the workflow`)
-        this.catalogs.set(c.name, c)
-      })
-      return catalog.map((c) => c.name)
-    }
-
-    if (this.catalogs.has(catalog.name)) {
-      throw new Error(`duplicate-dataset: ${catalog.name}`)
-    }
-
-    this.catalogs.set(catalog.name, catalog)
-    console.log(`added ${catalog.name} to the workflow`)
-    return catalog.name
-  }
-
-  async promisifyProcessResult (
-    child: ChildProcessWithoutNullStreams
-  ): Promise<ProcessResult> {
-    const result: ProcessResult = {
-      stdout: '',
-      stderr: '',
-      code: 0
-    }
-
-    return await new Promise((resolve, reject) => {
-      child.stdout.on('data', (data) => {
-        /* eslint-disable @typescript-eslint/restrict-plus-operands */
-        result.stdout += data
-      })
-
-      child.on('close', (code) => {
-        result.code = code === 0 ? 0 : 1
-        resolve(result)
-      })
-
-      child.on('error', (err) => {
-        reject(err)
-      })
-    })
-  }
-
-  async exec (cmd: string, args: string[]): Promise<ProcessResult> {
-    const run = spawn(cmd, args)
-
-    const result: ProcessResult = {
-      stdout: '',
-      stderr: '',
-      code: 0
-    }
-
-    return await new Promise((resolve, reject) => {
-      run.stdout.on('data', (data) => {
-        /* eslint-disable @typescript-eslint/restrict-plus-operands */
-        result.stdout += data
-      })
-
-      run.on('close', (code) => {
-        result.code = code === 0 ? 0 : 1
-        resolve(result)
-      })
-
-      run.on('error', (err) => {
-        reject(err)
-      })
-    })
-  }
-
-  async query (raw: string): Promise<void> {
-    let from = ''
-
-    const parsed = new Parser().parse(raw)
-
-    if (parsed.from.length === 1) {
-      from = parsed.from[0].relname
-    }
-
-    console.log(`raw query: ${raw}`)
-
-    console.log(JSON.stringify(parsed, null, 2))
-
-    if (!this.catalogs.has(from)) {
-      throw new Error(`unknown-catalog: ${from}`)
-    }
-
-    const catalog = this.catalogs.get(from)
-
-    if (catalog == null) {
-      throw new Error(`catalog-not-found: ${from}`)
-    }
-
-    console.log(`querying catalog: ${catalog.name}`)
-
-    const plan = new Analyzer(catalog, parsed).analyze()
-
-    console.log(JSON.stringify(plan, null, 2))
-
-    // if (ast.columns[0].name === '*') {
-    //   console.log('columns: *')
-    // }
-
-    // if (ast.columns.length > 1) {
-    //   console.log('columns: ', ast.columns.map((c) => c.name).join(', '))
-    //   // const columns = ast.columns.map((c) => c.name).join(',')
-    //   // await this.exec(mlr, ['--icsv', '--ojson', 'cut', '-f', columns, catalog.source, '>', catalog.destination])
-    // }
-
-    // const queryPlan = new Analyzer().analyze()
-    // console.log(queryPlan)
-  }
-}
-
-export function createWorkflow (name: string): Workflow {
-  console.log(`created workflow: ${name}`)
-  return new Workflow(name)
-}
-
 interface Stmt {
   type: string
   distinct: boolean
@@ -835,7 +679,6 @@ interface Stmt {
   }
 }
 
-// Parser parses a SQL statement and returns a tree used later in the analyzer
 class Parser {
   query: string
   stmt: Stmt
@@ -869,11 +712,13 @@ class Parser {
     if (raw.trim() === '') {
       throw new Error('invalid-query: no query found')
     }
-
     const rawAST = parse(raw)
 
-    const ast = rawAST[0].RawStmt.stmt.SelectStmt
+    if (Object.keys(rawAST[0].RawStmt.stmt)[0] === 'SelectStmt') {
+      this.stmt.type = 'select'
+    }
 
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt
     const limit = ast.limitOption
 
     if (limit === 'LIMIT_OPTION_DEFAULT') {
@@ -897,20 +742,13 @@ class Parser {
     if (ast.targetList !== undefined) {
       this.stmt.columns = ast.targetList.map(
         (t: {
-          ResTarget: { val: { ColumnRef: { fields: any[] } }, name: any }
+          ResTarget: { val: { ColumnRef: { fields: any[] } }}
         }) => {
           const col = t.ResTarget.val.ColumnRef.fields[0]
 
           if (col.A_Star !== undefined) {
             return {
               name: '*'
-            }
-          }
-
-          if (t.ResTarget.name !== undefined) {
-            return {
-              as: t.ResTarget.name,
-              name: col.String.str
             }
           }
           return {
@@ -992,7 +830,8 @@ class Parser {
 }
 
 interface ExecutePlan {
-  name: string
+  cmd: string
+  args: string[]
 }
 class Analyzer {
   catalog: Catalog
@@ -1002,12 +841,156 @@ class Analyzer {
     this.stmt = stmt
     this.catalog = catalog
     this.plan = {
-      name: 'beepboop'
+      cmd: '',
+      args: []
     }
   }
 
   analyze (): ExecutePlan {
     console.log('analyzing query')
+
+    this.plan.cmd = mlr
+
+    if (this.stmt.type !== 'select') {
+      throw new Error('not-implemented: only select queries are supported at this time')
+    }
+
+    console.log(this.stmt)
+
+    if (this.stmt.from.length === 1) {
+      const table = this.stmt.from[0].relname
+      console.log('from table: ', table)
+
+      const source = this.catalog.options.source
+      // const destination = this.catalog.options.destination
+      if (this.stmt.columns.length === 1) {
+        if (this.stmt.columns[0].name === '*') {
+          this.plan.args = ['--icsv', '--ojson', 'cat', source]
+          return this.plan
+        }
+
+        this.plan.args = ['--icsv', '--ojson', 'cut', '-f', this.stmt.columns[0].name, source]
+      }
+
+      if (this.stmt.columns.length > 1) {
+        const fields = this.stmt.columns.map((col: { name: string }) => col.name).join(',')
+        console.log('fields: ', fields)
+        this.plan.args = ['--icsv', '--ojson', 'cut', '-o', '-f', fields, source]
+        return this.plan
+      }
+    }
     return this.plan
   }
+}
+
+class Workflow {
+  name: string
+  catalogs: Map<string, Catalog>
+  createdAt: Date
+  env: env
+  stmt: string
+
+  constructor (name: string) {
+    this.name = name
+    this.catalogs = new Map()
+    this.createdAt = new Date()
+    this.env = 'local'
+    this.stmt = ''
+  }
+
+  list (): Catalog[] {
+    return Array.from(this.catalogs.values())
+  }
+
+  remove (dataset: Catalog): void {
+    this.catalogs.delete(dataset.options.source)
+  }
+
+  get (source: string): Catalog | undefined {
+    if (this.catalogs.get(source) != null) {
+      return this.catalogs.get(source)
+    }
+    return undefined
+  }
+
+  add (catalog: Catalog | [Catalog]): string | string[] {
+    if (Array.isArray(catalog)) {
+      if (catalog.length === 1 && catalog[0].name !== '') {
+        const c = catalog[0]
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`)
+        }
+        this.catalogs.set(c.name, c)
+        return c.name
+      }
+
+      catalog.forEach((c) => {
+        if (this.catalogs.has(c.name)) {
+          throw new Error(`duplicate-dataset: ${c.name}`)
+        }
+        console.log(`added ${c.name} to the workflow`)
+        this.catalogs.set(c.name, c)
+      })
+      return catalog.map((c) => c.name)
+    }
+
+    if (this.catalogs.has(catalog.name)) {
+      throw new Error(`duplicate-dataset: ${catalog.name}`)
+    }
+
+    this.catalogs.set(catalog.name, catalog)
+    console.log(`added ${catalog.name} to the workflow`)
+    return catalog.name
+  }
+
+  async query (raw: string): Promise<void> {
+    let from = ''
+
+    const ast = new Parser().parse(raw)
+
+    if (ast.from.length === 1) {
+      from = ast.from[0].relname
+    }
+
+    console.log(`raw query: ${raw}`)
+
+    if (!this.catalogs.has(from)) {
+      throw new Error(`unknown-catalog: ${from}`)
+    }
+
+    const catalog = this.catalogs.get(from)
+
+    if (catalog == null) {
+      throw new Error(`catalog-not-found: ${from}`)
+    }
+
+    console.log(`using catalog: ${catalog.name}`)
+
+    const plan = new Analyzer(catalog, ast).analyze()
+
+    console.log(`plan: ${JSON.stringify(plan, null, 2)}`)
+
+    if (catalog.connector instanceof fs.WriteStream) {
+      console.log(`${plan.cmd} ${plan.args.join(' ')}`)
+      const proc = spawn(plan.cmd, plan.args)
+      proc.stdout.pipe(catalog.connector)
+    }
+
+    // const outputF = fs.createWriteStream(catalog.options.destination)
+
+    // proc.stdout.pipe(catalog.connector)
+
+    // const mlrExec = await spawn(plan.cmd, plan.args)
+
+    // pipe to wriestream on catalog
+
+    // mlrExec.stdout.pipe(catalog.connector)
+
+    // console.log(`query result: ${res.stdout}`)
+  }
+}
+
+export function createWorkflow (name: string): Workflow {
+  console.log(`created workflow: ${name}`)
+  return new Workflow(name)
 }

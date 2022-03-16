@@ -5,18 +5,34 @@ import { fileURLToPath } from 'url'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-tap.test('create catalog', async (t) => {
+tap.test('select *', async (t) => {
   const catalog = await createCatalog({
     source: path.join(dirname, 'example', 'albums.csv'),
     name: 'albums',
     output: 'json',
-    destination: path.join(process.cwd(), 'beep.json')
+    destination: path.join(process.cwd(), 'result1.json')
   })
 
-  // console.log(JSON.stringify(catalog, null, 2))
   const workflow = createWorkflow('my_etl')
   workflow.add(catalog)
-  await workflow.query('SELECT album_title, num_of_sales FROM albums')
-  t.ok('ok')
+  await workflow.query('SELECT * FROM albums')
+
+  t.ok(catalog)
   t.end()
 })
+
+// tap.test('select *', async (t) => {
+//   const catalog = await createCatalog({
+//     source: path.join(dirname, 'example', 'albums.csv'),
+//     name: 'albums',
+//     output: 'json',
+//     destination: path.join(process.cwd(), 'result2.json')
+//   })
+
+//   const workflow = createWorkflow('my_etl')
+//   workflow.add(catalog)
+//   await workflow.query('SELECT album_title FROM albums WITH ( format = "json" source = "./test/example/albums.csv" destination = "result3.json" )')
+
+//   t.ok(catalog)
+//   t.end()
+// })
