@@ -94,7 +94,8 @@ async function build () {
 
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    minify: true,
+    // minify: true,
+    bundle: true,
     target: 'es6',
     platform: 'node',
     logLevel: 'info',
@@ -105,7 +106,8 @@ async function build () {
 
   const cjs = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    minify: true,
+    // minify: true,
+    bundle: true,
     target: 'es6',
     platform: 'node',
     logLevel: 'info',
@@ -116,7 +118,8 @@ async function build () {
 
   const cli = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'bin/cli.js')],
-    minify: false,
+    minify: true,
+    bundle: true,
     target: 'es6',
     logLevel: 'info',
     platform: 'node',

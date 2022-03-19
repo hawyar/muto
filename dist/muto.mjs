@@ -1,1 +1,283 @@
-var u=(i,e,t)=>new Promise((r,s)=>{var l=o=>{try{d(t.next(o))}catch(a){s(a)}},n=o=>{try{d(t.throw(o))}catch(a){s(a)}},d=o=>o.done?r(o.value):Promise.resolve(o.value).then(l,n);d((t=t.apply(i,e)).next())});import m from"fs";import{spawn as w}from"child_process";import y from"os";import E,{join as v}from"path";import{VFile as C}from"vfile";import{parse as S}from"pgsql-parser";import{createInterface as $}from"readline";import{CreateMultipartUploadCommand as b,PutObjectCommand as P,S3Client as O}from"@aws-sdk/client-s3";import{fromIni as x}from"@aws-sdk/credential-providers";const h=v(process.cwd(),"node_modules","muto","node_modules",".bin","mlr@v6.0.0");var k=(n=>(n.COMMA=",",n.TAB="	",n.SPACE=" ",n.PIPE="|",n.SEMICOLON=";",n.COLON=":",n))(k||{});const g=i=>x({profile:i,mfaCodeProvider:e=>u(void 0,null,function*(){return e})});function f(i){return new O(i)}function R(i,e){const t={file:e.file?e.file:!1};if(!i.startsWith("s3://")||i.split(":/")[0]!=="s3")throw new Error(`invalid-s3-uri: ${i}`);let r="";const s={bucket:"",key:"",file:""},l=i.split(":/")[1],[n,...d]=l.split("/").splice(1);return s.bucket=n,s.key=d.join("/"),d.forEach((o,a)=>{if(a===d.length-1){const c=o.split(".").length;if(t.file&&c===1&&(r=`uri should be a given, given: ${i}`),!t.file&&c===1)return;if(!t.file&&c>1){r=`Invalid S3 uri, ${i} should not end with a file name`;return}!t.file&&o.split(".")[1]!==""&&c>1&&(r=`${i} should not be a file endpoint: ${o}`),c>1&&o.split(".")[1]!==""&&(s.file=o)}}),{data:s,err:r}}function p(i,e){return u(this,null,function*(){console.log(`${i} ${e.join(" ")}`);const t=w(i,e),r={stdout:"",stderr:"",code:0};return yield new Promise((s,l)=>{t.stdout.on("data",n=>{r.stdout+=n}),t.stderr.on("data",n=>{throw new Error(n.toString())}),t.on("close",n=>{r.code=n===0?0:1,s(r)}),t.on("error",n=>{console.log(JSON.stringify(n)),l(n)})})})}class A{constructor(e){this.name=e.name!==""?e.name:E.basename(e.source),this.options=e,this.env="local",this.init=new Date,this.state="init",this.pcount=0,this.columns=[],this.connector=null,this.loader=null,this.vfile=new C({path:this.options.source}),this.stmt={type:"",distinct:!1,columns:[{name:"",type:""}],from:[{schemaname:"",relname:"",inh:""}],sort:[],where:{},group:[],orderBy:[],having:[],limit:{type:"",val:""}}}rowCount(){return u(this,null,function*(){const e=yield p(h,["--ojson","count",this.options.source]);if(e.code!==0)throw new Error(`Error while counting rows: ${e.stderr}`);if(e.stderr!=="")throw new Error(e.stderr);const t=JSON.parse(e.stdout);if(t.length===0)throw new Error("Error while counting rows");if(t[0].count===void 0)throw new Error("Error while counting rows");return t[0].count})}headerColumn(){return u(this,null,function*(){const e=yield p(h,["--icsv","--ojson","head","-n","1",this.options.source]);if(e.code!==0)throw new Error(`Error while getting column header: ${e.stderr}`);const t=JSON.parse(e.stdout);if(t.length===0)throw new Error("No columns found");this.columns=Object.keys(t[0])})}preview(e=20,t){return u(this,null,function*(){if(t===void 0)throw new Error("stream-destination-undefined");const r=yield p(h,["--icsv","--ojson","head","-n",e.toString(),this.options.source]);if(r.stderr!=="")throw new Error(r.stderr);if(r.code!==0)throw new Error("Error while executing mlr command");return this.vfile.data.preview=JSON.parse(r.stdout),JSON.parse(r.stdout)})}fileType(){return u(this,null,function*(){if(y.platform()!=="linux"&&y.platform()!=="darwin")throw new Error("scream");const e=yield p("file",[this.options.source,"--mime-type"]);if(e.stderr!=="")throw new Error(`failed-to-detect-mime-type: ${e.stderr}`);if(e.code!==0)throw new Error(`failed-to-detect-mime-type: ${e.stderr}`);const t=e.stdout.split(":")[1].trim();if(t==="")throw new Error("failed-to-detect-mime-type");return t})}determineShape(){return u(this,null,function*(){const e=this.options.source,t={type:"",size:0,columns:[],header:!1,encoding:"utf-8",bom:!1,spanMultipleLines:!1,quotes:!1,delimiter:",",errors:{},warnings:{},preview:[]};t.size=yield this.fileSize(),t.type=yield this.fileType();const r=$({input:m.createReadStream(e),crlfDelay:1/0});let s=0;const l=10,n={row:[""],del:""};let d="";const o=[",",";","	","|",":"," ","|"];r.on("line",a=>{if(s===0&&(o.forEach(c=>{a.split(c).length>1&&(n.row=a.split(c),n.del=c)}),(n.del===""||n.row.length<=1)&&(t.errors.unrecognizedDelimiter=`${e} does not have a recognized delimiter`,t.header=!1),n.row.forEach(c=>{isNaN(parseInt(c.substring(0,3)))||(t.header=!1,t.warnings.noHeader="no header found",s++)}),t.header=!0,t.delimiter=n.del,t.columns=n.row),s>0&&s<l+1){const c=a.split('"').length-1;if(d!==""&&c%2!==0&&(t.spanMultipleLines=!0),console.log(c),console.log(a.split('"')),c%2!==0&&a.split('""').length-1!==1&&(d=a),a.split(n.del).length!==n.row.length){t.errors.rowWidthMismatch="row width mismatch";return}t.preview.push(a.split(n.del))}s++}),r.on("close",()=>{this.vfile.data.shape=t})})}determineLoader(){if(this.options.destination.startsWith("s3://")){this.loader=f({credentials:g("default"),region:"us-east-2"});return}if(this.options.source.startsWith("/")||this.options.source.startsWith("../")||this.options.source.startsWith("./")){this.loader=m.createReadStream(this.options.source);return}throw new Error("unsupported-loader")}determineConnector(){switch(this.env){case"local":if(!m.existsSync(this.options.source))throw new Error(`file: ${this.options.source} not found, please provide a valid file path`);this.connector=m.createWriteStream(this.options.destination);break;case"aws":this.connector=f({credentials:g("default"),region:"us-east-2"});break;default:throw new Error(`unsupported-source for: ${this.options.source}`)}}determineEnv(){const e=this.options.source;if(e.startsWith("/")||e.startsWith("../")||e.startsWith("./")){this.env="local";return}if(e.startsWith("s3://")){this.env="aws";return}throw new Error(`invalid-source-type: ${e}`)}fileSize(){return u(this,null,function*(){const e=this.options.source;return(yield m.promises.stat(e)).size})}uploadToS3(){return u(this,null,function*(){const e=this.options.source,t=this.options.destination;if(e==="")throw new Error("source not definded");if(t==="")throw new Error("destination not definded");const r=m.createReadStream(e);if(!r.readable)throw new Error("failed-to-read-source: Make sure the provided file is readable");const s=yield this.fileSize();s>100*1024*1024&&console.warn(`file size ${s} is larger`);const{data:l,err:n}=R(t,{file:!0});if(n.toString().startsWith("invalid-s3-uri"))throw new Error(`failed-to-parse-s3-uri: ${n}`);l.file===""&&(l.file=E.basename(e),console.warn("Destination filename not provided. Using source source basename"+l.file)),console.log(`uploading ${e} to ${t}`);const o=yield f({region:"us-east-2"}).send(new P({Bucket:l.bucket,Key:l.key+l.file,Body:r})).catch(a=>{throw new Error(`failed-upload-s3: Error while uploading to S3: ${a}`)}).finally(()=>{r.close()});if(o.$metadata.httpStatusCode!==void 0&&o.$metadata.httpStatusCode!==200)throw new Error(`failed-upload-s3: Error while uploading to S3: ${o.$metadata.httpStatusCode}`);if(o.$metadata.requestId===void 0)throw new Error("failed-upload-s3");return o.$metadata.requestId})}initMultipartUpload(e,t){return u(this,null,function*(){const r=f({credentials:g("default"),region:"us-east-2"}),s=new b({Bucket:e,ContentEncoding:"utf8",ContentType:"text/csv",Key:t}),l=yield r.send(s);if(l.UploadId===void 0||l.$metadata.httpStatusCode!==200)throw new Error("failed-multipart-upload");if(l.UploadId===void 0)throw new Error("failed-multipart-upload");return l.UploadId})}}function X(i){return u(this,null,function*(){return yield new Promise((e,t)=>{(i.source===""||i.source===void 0)&&t(new Error("invalid-source: the source path is required")),i.destination===""&&t(new Error("failed-to-create-dataset: destination is required")),i.source.endsWith(".csv")||t(new Error(`invalid-file-type: expected a .csv file, ${i.source} is not`));const r=new A(i);Promise.all([r.determineEnv(),r.determineShape(),r.determineConnector(),r.determineLoader(),r.headerColumn(),r.fileSize(),r.rowCount()]).then(()=>{console.log(`created catalog for: ${i.name}`),e(r)}).catch(s=>t(s))})})}class I{constructor(){this.query="",this.stmt={type:"",distinct:!1,columns:[{name:"",type:""}],from:[{schemaname:"",relname:"",inh:""}],sort:{},where:{},group:[],having:[],orderBy:[],limit:{type:"",val:""}}}parse(e){var l,n,d;if(e.trim()==="")throw new Error("invalid-query: no query found");const t=S(e);Object.keys(t[0].RawStmt.stmt)[0]==="SelectStmt"&&(this.stmt.type="select");const r=t[0].RawStmt.stmt.SelectStmt,s=r.limitOption;if(s==="LIMIT_OPTION_DEFAULT"&&(this.stmt.limit={type:r.limitOption,val:""}),s==="LIMIT_OPTION_COUNT"&&r.limitCount!==""&&(this.stmt.limit={type:r.limitOption,val:r.limitCount.A_Const.val.Integer.ival}),r.distinctClause!==void 0&&(this.stmt.distinct=!0),r.targetList!==void 0&&(this.stmt.columns=r.targetList.map(o=>{const a=o.ResTarget.val.ColumnRef.fields[0];return a.A_Star!==void 0?{name:"*"}:{name:a.String.str}})),this.stmt.from=r.fromClause.map(o=>{const a={schemaname:"",relname:"",inh:""},c=o.RangeVar;return c.schemaname!==void 0&&(a.schemaname=c.schemaname),c.relname!==void 0&&(a.relname=c.relname),c.inh!==void 0&&(a.inh=c.inh),a}),r.whereClause!==void 0){if(r.whereClause!==null&&((l=r==null?void 0:r.whereClause)==null?void 0:l.A_Expr.kind)==="AEXPR_OP"){const o=r.whereClause.A_Expr,a={operator:"",left:{},right:{}};a.operator=o.name[0].String.str,o.lexpr!==null&&(a.left=o.lexpr.ColumnRef.fields[0].String.str),o.rexpr!==null&&(a.right=o.rexpr.ColumnRef.fields[0].String.str),this.stmt.where=a}if(((n=r==null?void 0:r.whereClause)==null?void 0:n.A_Expr)!==null&&((d=r==null?void 0:r.whereClause)==null?void 0:d.A_Expr.kind)==="AEXPR_IN"){const o=r.whereClause.A_Expr;console.log(o)}if(r.whereClause.BoolExpr!==null){if(r.whereClause.BoolExpr.boolop==="AND_EXPR"){const o=r.whereClause.BoolExpr.args;console.log(JSON.stringify(o,null,2))}if(r.whereClause.BoolExpr.boolop==="OR_EXPR"){const o=r.whereClause.BoolExpr.args;console.log(JSON.stringify(o,null,2))}}}return this.stmt}}class T{constructor(e,t){this.stmt=t,this.catalog=e,this.plan={cmd:"",args:[]}}analyze(){if(console.log("analyzing query"),this.plan.cmd=h,this.stmt.type!=="select")throw new Error("not-implemented: only select queries are supported at this time");if(console.log(this.stmt),this.stmt.from.length===1){const e=this.stmt.from[0].relname;console.log("from table: ",e);const t=this.catalog.options.source;if(this.stmt.columns.length===1){if(this.stmt.columns[0].name==="*")return this.plan.args=["--icsv","--ojson","cat",t],this.plan;this.plan.args=["--icsv","--ojson","cut","-f",this.stmt.columns[0].name,t]}if(this.stmt.columns.length>1){const r=this.stmt.columns.map(s=>s.name).join(",");return console.log("fields: ",r),this.plan.args=["--icsv","--ojson","cut","-o","-f",r,t],this.plan}}return this.plan}}class N{constructor(e){this.name=e,this.catalogs=new Map,this.createdAt=new Date,this.env="local",this.stmt=""}list(){return Array.from(this.catalogs.values())}remove(e){this.catalogs.delete(e.options.source)}get(e){if(this.catalogs.get(e)!=null)return this.catalogs.get(e)}add(e){if(Array.isArray(e)){if(e.length===1&&e[0].name!==""){const t=e[0];if(this.catalogs.has(t.name))throw new Error(`duplicate-dataset: ${t.name}`);return this.catalogs.set(t.name,t),t.name}return e.forEach(t=>{if(this.catalogs.has(t.name))throw new Error(`duplicate-dataset: ${t.name}`);console.log(`added ${t.name} to the workflow`),this.catalogs.set(t.name,t)}),e.map(t=>t.name)}if(this.catalogs.has(e.name))throw new Error(`duplicate-dataset: ${e.name}`);return this.catalogs.set(e.name,e),console.log(`added ${e.name} to the workflow`),e.name}query(e){return u(this,null,function*(){let t="";const r=new I().parse(e);if(r.from.length===1&&(t=r.from[0].relname),console.log(`raw query: ${e}`),!this.catalogs.has(t))throw new Error(`unknown-catalog: ${t}`);const s=this.catalogs.get(t);if(s==null)throw new Error(`catalog-not-found: ${t}`);console.log(`using catalog: ${s.name}`);const l=new T(s,r).analyze();console.log(`plan: ${JSON.stringify(l,null,2)}`),s.connector instanceof m.WriteStream&&(console.log(`${l.cmd} ${l.args.join(" ")}`),w(l.cmd,l.args).stdout.pipe(s.connector))})}}function F(i){return console.log(`created workflow: ${i}`),new N(i)}export{X as createCatalog,F as createWorkflow};
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+
+// lib/catalog.ts
+import path, { join } from "path";
+import os from "os";
+import fs from "fs";
+import { exec } from "child_process";
+import util from "util";
+var execify = util.promisify(exec);
+var mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+var Catalog = class {
+  constructor(options) {
+    this.name = options.name !== "" ? options.name : path.basename(options.source);
+    this.options = options;
+    this.env = "local";
+    this.createdAt = new Date();
+    this.state = "init";
+    this.connector = null;
+    this.loader = null;
+    this.metadata = {
+      type: "",
+      columns: [],
+      header: false,
+      extension: "",
+      size: 0,
+      rowCount: 0,
+      spanMultipleLines: false,
+      quotes: false,
+      delimiter: ",",
+      errors: {},
+      warnings: {}
+    };
+  }
+  rowCount() {
+    return __async(this, null, function* () {
+      const rCount = yield execify(`${mlr} --ojson count ${this.options.source}`);
+      if (rCount.stderr !== "") {
+        throw new Error(`failed-to-get-row-count: ${rCount.stderr}`);
+      }
+      const rowCount = JSON.parse(rCount.stdout);
+      if (rowCount.length === 0) {
+        throw new Error("failed-to-get-row-count: no rows found");
+      }
+      if (rowCount[0].count === void 0) {
+        throw new Error("failed-to-get-row-count: no count found");
+      }
+      this.metadata.rowCount = rowCount[0].count;
+    });
+  }
+  headerColumn() {
+    return __async(this, null, function* () {
+      const header = yield execify(`${mlr} --icsv --ojson head -n 1 ${this.options.source}`);
+      if (header.stderr !== "") {
+        throw new Error(`failed-to-get-header-column: ${header.stderr}`);
+      }
+      const columns = JSON.parse(header.stdout);
+      if (columns.length === 0) {
+        throw new Error("failed-to-get-header-column: no columns found");
+      }
+      this.metadata.columns = Object.keys(columns[0]);
+    });
+  }
+  fileType() {
+    return __async(this, null, function* () {
+      if (os.platform() !== "linux" && os.platform() !== "darwin") {
+        throw new Error("unsupported-platform");
+      }
+      const mime = yield execify(`file ${this.options.source} --mime-type`);
+      if (mime.stderr !== "") {
+        throw new Error(`failed-to-detect-mime-type: ${mime.stderr}`);
+      }
+      const type = mime.stdout.split(":")[1].trim();
+      if (type === "") {
+        throw new Error("failed-to-detect-mime-type");
+      }
+      if (this.options.source.endsWith(".csv")) {
+        this.metadata.extension = "csv";
+      }
+      if (this.options.source.endsWith(".json")) {
+        this.metadata.extension = "json";
+      }
+      this.metadata.type = type;
+    });
+  }
+  fileSize() {
+    return __async(this, null, function* () {
+      const stat = yield fs.promises.stat(this.options.source);
+      this.metadata.size = stat.size;
+    });
+  }
+  determineEnv() {
+    const source = this.options.source;
+    if (source.startsWith("/") || source.startsWith("../") || source.startsWith("./")) {
+      this.env = "local";
+      return;
+    }
+    if (source.startsWith("s3://")) {
+      this.env = "s3";
+      return;
+    }
+    throw new Error(`invalid-source-type: ${source}`);
+  }
+};
+function createCatalog(opt) {
+  return __async(this, null, function* () {
+    return yield new Promise((resolve, reject) => {
+      if (opt.source === "" || opt.source === void 0) {
+        reject(new Error("failed-to-create-catalog: no source provided"));
+      }
+      if (opt.destination === "" || opt.destination === void 0) {
+        reject(new Error("failed-to-create-catalog: no destination provided"));
+      }
+      if (opt.name === "" || opt.name === void 0) {
+        reject(new Error("failed-to-create-catalog: no name provided"));
+      }
+      if (opt.input === "csv" && !opt.source.endsWith(".csv")) {
+        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      }
+      if (opt.input === "json" && !opt.source.endsWith(".json")) {
+        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      }
+      const catalog = new Catalog(opt);
+      Promise.all([
+        catalog.determineEnv(),
+        catalog.headerColumn(),
+        catalog.fileSize(),
+        catalog.fileType(),
+        catalog.rowCount()
+      ]).then(() => {
+        console.log(`created catalog for: ${opt.name}`);
+        resolve(catalog);
+      }).catch((err) => reject(err));
+    });
+  });
+}
+
+// lib/parser.ts
+import { parse } from "pgsql-parser";
+var Parser = class {
+  constructor() {
+    this.query = "";
+    this.stmt = {
+      type: "",
+      distinct: false,
+      columns: [{
+        name: "",
+        type: ""
+      }],
+      from: [{
+        schemaname: "",
+        relname: "",
+        inh: ""
+      }],
+      sort: {},
+      where: {},
+      group: [],
+      having: [],
+      orderBy: [],
+      limit: {
+        type: "",
+        val: ""
+      }
+    };
+  }
+  parse(raw) {
+    var _a, _b, _c;
+    if (raw.trim() === "") {
+      throw new Error("invalid-query: no query found");
+    }
+    console.log(`raw: ${raw}`);
+    const rawAST = parse(raw);
+    if (Object.keys(rawAST[0].RawStmt.stmt)[0] === "SelectStmt") {
+      this.stmt.type = "select";
+    }
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt;
+    const limit = ast.limitOption;
+    if (limit === "LIMIT_OPTION_DEFAULT") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ""
+      };
+    }
+    if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ast.limitCount.A_Const.val.Integer.ival
+      };
+    }
+    if (ast.distinctClause !== void 0) {
+      this.stmt.distinct = true;
+    }
+    if (ast.targetList !== void 0) {
+      this.stmt.columns = ast.targetList.map((t) => {
+        const col = t.ResTarget.val.ColumnRef.fields[0];
+        if (col.A_Star !== void 0) {
+          return {
+            name: "*"
+          };
+        }
+        return {
+          name: col.String.str
+        };
+      });
+    }
+    this.stmt.from = ast.fromClause.map((from) => {
+      const source = {
+        schemaname: "",
+        relname: "",
+        inh: ""
+      };
+      const t = from.RangeVar;
+      if (t.schemaname !== void 0) {
+        source.schemaname = t.schemaname;
+      }
+      if (t.relname !== void 0) {
+        source.relname = t.relname;
+      }
+      if (t.inh !== void 0) {
+        source.inh = t.inh;
+      }
+      return source;
+    });
+    if (ast.whereClause !== void 0) {
+      if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
+        const expr = ast.whereClause.A_Expr;
+        const where = {
+          operator: "",
+          left: {},
+          right: {}
+        };
+        where.operator = expr.name[0].String.str;
+        if (expr.lexpr !== null) {
+          where.left = expr.lexpr.ColumnRef.fields[0].String.str;
+        }
+        if (expr.rexpr !== null) {
+          where.right = expr.rexpr.ColumnRef.fields[0].String.str;
+        }
+        this.stmt.where = where;
+      }
+      if (((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr) !== null && ((_c = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _c.A_Expr.kind) === "AEXPR_IN") {
+        const expr = ast.whereClause.A_Expr;
+        console.log(expr);
+      }
+      if (ast.whereClause.BoolExpr !== null) {
+        if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
+          const args = ast.whereClause.BoolExpr.args;
+          console.log(JSON.stringify(args, null, 2));
+        }
+        if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
+          const args = ast.whereClause.BoolExpr.args;
+          console.log(JSON.stringify(args, null, 2));
+        }
+      }
+    }
+    return this.stmt;
+  }
+};
+function parseQuery(query) {
+  return new Parser().parse(query);
+}
+export {
+  createCatalog,
+  parseQuery
+};

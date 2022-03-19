@@ -1,26 +1,5 @@
 #!/usr/bin/env node
-var __async = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try {
-        step(generator.next(value));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    var rejected = (value) => {
-      try {
-        step(generator.throw(value));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
-  });
-};
-import arg from "arg";
-const usage = `
+var p=(o,f,n)=>new Promise((u,c)=>{var d=e=>{try{r(n.next(e))}catch(i){c(i)}},l=e=>{try{r(n.throw(e))}catch(i){c(i)}},r=e=>e.done?u(e.value):Promise.resolve(e.value).then(d,l);r((n=n.apply(o,f)).next())});import m from"arg";var a=`
 Usage:
   $muto [options]
   
@@ -32,58 +11,6 @@ Usage:
 
     -f --from      Path of the file to source from
     -t --to        Destination path of where to save the output to
-`;
-const args = arg({
-  "--help": Boolean,
-  "--version": Boolean,
-  "--from": String,
-  "--to": String,
-  "-h": "--help",
-  "-v": "--version",
-  "-f": "--from",
-  "-t": "--to"
-});
-if (args["--help"]) {
-  stdWrite(usage);
-  process.exit(0);
-}
-if (args["--version"]) {
-  stdWrite("v0.1.0");
-  process.exit(0);
-}
-const commands = args._;
-if (Object.keys(args).length === 1) {
-  stdWrite(usage);
-  process.exit(0);
-}
-const operations = {
-  upload: "UPLOAD"
-};
-function run() {
-  return __async(this, null, function* () {
-    const input = {
-      from: "",
-      to: ""
-    };
-    if (args["--from"]) {
-      input.from = args["--from"];
-    }
-    if (args["--to"]) {
-      input.to = args["--to"];
-    }
-    if (commands.indexOf("upload") === -1) {
-      input.operation = operations.upload;
-    }
-    process.exit(0);
-  });
-}
-function stdWrite(msg) {
-  typeof msg === "string" ? process.stdout.write(`${msg} 
-`) : process.stdout.write(`${JSON.stringify(msg, null, 2)}
-`);
-}
-run().catch(console.error);
-process.on("unhandledRejection", (reason, promise) => {
-  stdWrite(reason);
-  process.exit(1);
-});
+`,t=m({"--help":Boolean,"--version":Boolean,"--from":String,"--to":String,"-h":"--help","-v":"--version","-f":"--from","-t":"--to"});t["--help"]&&(s(a),process.exit(0));t["--version"]&&(s("v0.1.0"),process.exit(0));var h=t._;Object.keys(t).length===1&&(s(a),process.exit(0));var v={upload:"UPLOAD"};function g(){return p(this,null,function*(){let o={from:"",to:""};t["--from"]&&(o.from=t["--from"]),t["--to"]&&(o.to=t["--to"]),h.indexOf("upload")===-1&&(o.operation=v.upload),process.exit(0)})}function s(o){typeof o=="string"?process.stdout.write(`${o} 
+`):process.stdout.write(`${JSON.stringify(o,null,2)}
+`)}g().catch(console.error);process.on("unhandledRejection",(o,f)=>{s(o),process.exit(1)});
