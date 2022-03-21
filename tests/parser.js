@@ -22,3 +22,9 @@ tap.test('limit', async (t) => {
   t.same('5', parseQuery('select team, score from dd limit 5').limit.val)
   t.end()
 })
+
+tap.test('nested query', async (t) => {
+  console.log(parseQuery('select team, score from bb where id = 33 limit 5'))
+  t.ok('22')
+  t.end()
+})

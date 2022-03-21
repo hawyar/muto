@@ -33,7 +33,7 @@ interface Metadata {
   preview?: string[][]
 }
 
-interface CatalogOptions {
+export interface CatalogOptions {
   name: string
   input: 'csv' | 'json'
   source: string
