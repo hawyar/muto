@@ -6,33 +6,8 @@ import tap from 'tap'
 // const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 tap.test('select *', async (t) => {
-  // const catalog = await createCatalog({
-  //   source: path.join(dirname, 'example', 'albums.csv'),
-  //   name: 'albums',
-  //   output: 'json',
-  //   destination: path.join(process.cwd(), 'result1.json')
-  // })
-
-  // const workflow = createWorkflow('my_etl')
-  // workflow.add(catalog)
-  // await workflow.query('SELECT * FROM albums')
+  await 
 
   t.ok('dd')
   t.end()
 })
-
-// tap.test('select *', async (t) => {
-//   const catalog = await createCatalog({
-//     source: path.join(dirname, 'example', 'albums.csv'),
-//     name: 'albums',
-//     output: 'json',
-//     destination: path.join(process.cwd(), 'result2.json')
-//   })
-
-//   const workflow = createWorkflow('my_etl')
-//   workflow.add(catalog)
-//   await workflow.query('SELECT album_title FROM albums WITH ( format = "json" source = "./test/example/albums.csv" destination = "result3.json" )')
-
-//   t.ok(catalog)
-//   t.end()
-// })

@@ -2,8 +2,8 @@
 import fs from 'fs';
 import { S3Client } from '@aws-sdk/client-s3';
 declare type env = 'local' | 's3';
-declare type connectorType = S3Client | fs.WriteStream;
-declare type loaderType = S3Client | fs.ReadStream;
+declare type connectorType = S3Client | fs.ReadStream;
+declare type loaderType = S3Client | fs.WriteStream;
 declare type catalogStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready';
 declare type Delimiter = ',' | '\t';
 interface Metadata {
@@ -24,7 +24,7 @@ interface Metadata {
     };
     preview?: string[][];
 }
-interface CatalogOptions {
+export interface CatalogOptions {
     name: string;
     input: 'csv' | 'json';
     source: string;
@@ -49,7 +49,8 @@ export declare class Catalog {
     headerColumn(): Promise<void>;
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
-    determineEnv(): void;
+    determineLoader(): void;
+    determineConnector(): void;
 }
-export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;
+export declare function createCatalog(query: String, opt: CatalogOptions): Promise<Catalog>;
 export {};

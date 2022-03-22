@@ -54,7 +54,7 @@ async function build () {
   }
 
   // using https://github.com/hawyar/vitess-sqlparse to parse query statements
-  // it is my fork of https://github.com/blastrain/vitess-sqlparser
+  // fork of https://github.com/blastrain/vitess-sqlparser
   const sqlparserSemver = '0.1.4'
   const sqlparser = 'sqlparser@' + 'v' + sqlparserSemver
   const sqlparserInBin = path.join(
@@ -94,7 +94,7 @@ async function build () {
 
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    // minify: true,
+    minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',
@@ -106,7 +106,7 @@ async function build () {
 
   const cjs = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    // minify: true,
+    minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',

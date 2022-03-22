@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import arg from 'arg'
-import { query } from '../dist/muto.js'
+import { query } from '../dist/muto.mjs'
 
 const usage = `
 Usage: \n
@@ -13,8 +13,9 @@ flags:
   -v    --version       Print version
   -s    --source        Source path
   -d    --destination   Destination path
-  -i    --input        Input format
+  -i    --input         Input format
   -o    --output        Output format
+  -n    --name          Name of the query
 `
 
 const args = arg({
@@ -24,13 +25,15 @@ const args = arg({
   '--destination': String,
   '--input': String,
   '--output': String,
+  '--name': String,
 
   '-h': '--help',
   '-v': '--version',
   '-s': '--source',
   '-d': '--destination',
   '-i': '--input',
-  '-o': '--output'
+  '-o': '--output',
+  '-n': '--name'
 })
 
 async function run () {
@@ -44,18 +47,18 @@ async function run () {
     process.exit(0)
   }
 
-  if (args["_"].length === 0) {
+  if (args._.length === 0) {
     stdout(`Missing command \n${usage}`)
     process.exit(1)
   }
 
-  if (args["_"].length !== 2) {
+  if (args._.length !== 2) {
     stdout(`Missing command ${usage}`)
     process.exit(1)
   }
 
-  if (args["_"][0] !== 'query') {
-    stdout(`Invalid command ${usage}`)
+  if (args._[0] !== 'query') {
+    stdout('Invalid command')
   }
 
   if (!args['--source']) {
@@ -71,18 +74,14 @@ async function run () {
   const input = {
     input: args['--input'] || 'csv',
     output: args['--output'] || 'csv',
+    name: args['--name'] || 'first_query',
     source: args['--source'],
     destination: args['--destination']
   }
- 
-  const query = args["_"][1]
 
-  console.log(args)
-
-  const result = await query(query, input)
+  await query(args._[1], input)
   process.exit(0)
 }
-
 
 function stdout (msg) {
   typeof msg === 'string'

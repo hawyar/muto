@@ -21,7 +21,7 @@ git clone https://github.com/hawyar/muto.git
 cd muto && npm i && npm run build
 ```
 
-3. Install muto iin your project
+3. Use muto in your project
 ```bash
 npm i ./path_to_muto
 ```
