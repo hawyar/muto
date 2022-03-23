@@ -79,6 +79,11 @@ async function run () {
     destination: args['--destination']
   }
 
+  if (args._[1] === '') {
+    stdout('Missing query')
+    process.exit(1)
+  }
+
   await query(args._[1], input)
   process.exit(0)
 }
