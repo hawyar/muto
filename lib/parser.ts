@@ -106,29 +106,31 @@ class Parser {
       )
     }
 
-    this.stmt.from = ast.fromClause.map((from: { RangeVar: any }) => {
-      const source = {
-        schemaname: '',
-        relname: '',
-        inh: ''
-      }
+    if (ast.fromClause !== undefined) {
+      this.stmt.from = ast.fromClause.map((from: { RangeVar: any }) => {
+        const source = {
+          schemaname: '',
+          relname: '',
+          inh: ''
+        }
 
-      const t = from.RangeVar
+        const t = from.RangeVar
 
-      if (t.schemaname !== undefined) {
-        source.schemaname = t.schemaname
-      }
+        if (t.schemaname !== undefined) {
+          source.schemaname = t.schemaname
+        }
 
-      if (t.relname !== undefined) {
-        source.relname = t.relname
-      }
+        if (t.relname !== undefined) {
+          source.relname = t.relname
+        }
 
-      if (t.inh !== undefined) {
-        source.inh = t.inh
-      }
+        if (t.inh !== undefined) {
+          source.inh = t.inh
+        }
 
-      return source
-    })
+        return source
+      })
+    }
 
     // if (ast["sortClause"]) {
     //     console.log(ast["sortClause"][0].SortBy)
@@ -146,30 +148,32 @@ class Parser {
 
         where.operator = expr.name[0].String.str
 
-        if (expr.lexpr !== null) {
+        if (expr.lexpr !== undefined) {
           where.left = expr.lexpr.ColumnRef.fields[0].String.str
         }
 
-        if (expr.rexpr !== null) {
-          where.right = expr.rexpr.ColumnRef.fields[0].String.str
+        if (expr.rexpr !== undefined) {
+          if (expr.rexpr.ColumnRef !== undefined && Object.keys(expr.rexpr.ColumnRef.fields[0]).includes('String')) {
+            where.right = expr.rexpr.ColumnRef.fields[0].String.str
+          }
+          if (expr.rexpr.A_Const !== undefined) {
+            where.right = expr.rexpr.A_Const.val.Integer.ival
+          }
         }
         this.stmt.where = where
       }
 
-      if (ast?.whereClause?.A_Expr !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_IN') {
-        const expr = ast.whereClause.A_Expr
-        console.log(expr)
+      if (ast.whereClause.A_Expr !== undefined && ast?.whereClause?.A_Expr.kind === 'AEXPR_IN') {
+        // const expr = ast.whereClause.A_Expr
       }
 
-      if (ast.whereClause.BoolExpr !== null) {
+      if (ast.whereClause.BoolExpr !== undefined) {
         if (ast.whereClause.BoolExpr.boolop === 'AND_EXPR') {
-          const args = ast.whereClause.BoolExpr.args
-          console.log(JSON.stringify(args, null, 2))
+          // const args = ast.whereClause.BoolExpr.args
         }
 
         if (ast.whereClause.BoolExpr.boolop === 'OR_EXPR') {
-          const args = ast.whereClause.BoolExpr.args
-          console.log(JSON.stringify(args, null, 2))
+          // const args = ast.whereClause.BoolExpr.args
         }
       }
     }
@@ -177,6 +181,6 @@ class Parser {
   }
 }
 
-export function parseQuery (query: string): Stmt {
+export function parseStmt (query: string): Stmt {
   return new Parser().parse(query)
 }

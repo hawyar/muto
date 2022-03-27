@@ -50,7 +50,7 @@ async function build () {
         })
       })
   } else {
-    console.log(`skipped: ${mlr} already installed`)
+    console.log(`skipped, ${mlr} already installed`)
   }
 
   // using https://github.com/hawyar/vitess-sqlparse to parse query statements
@@ -89,12 +89,14 @@ async function build () {
         })
       })
   } else {
-    console.log(`skipped: ${sqlparser} already installed`)
+    console.log(`skipped, ${sqlparser} already installed`)
   }
 
+  console.log("bundling muto")
+  
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    minify: true,
+    // minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',
@@ -106,7 +108,7 @@ async function build () {
 
   const cjs = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    minify: true,
+    // minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',

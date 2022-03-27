@@ -24,4 +24,4 @@ export interface Stmt {
         val: string;
     };
 }
-export declare function parseQuery(query: string): Stmt;
+export declare function parseStmt(query: string): Stmt;

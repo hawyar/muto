@@ -14,7 +14,10 @@ export const credentials = (profile: string): any => {
 }
 
 export function s3Client (config: S3ClientConfig): S3Client {
-  return new S3Client(config)
+  return s3Client({
+    credentials: credentials('default'),
+    region: 'us-east-2'
+  })
 }
 // async fileExists (key: string): Promise<boolean> {
 //   const client = s3Client({
@@ -94,102 +97,3 @@ export function parseS3Uri (
     err: err
   }
 }
-
-// async function uploadToS3 (): Promise<string> {
-//   const source = this.options.source
-//   const destination = this.options.destination
-
-//   if (source === '') {
-//     throw new Error('source not definded')
-//   }
-
-//   if (destination === '') {
-//     throw new Error('destination not definded')
-//   }
-
-//   const fStream = fs.createReadStream(source)
-
-//   if (!fStream.readable) {
-//     throw new Error(
-//       'failed-to-read-source: Make sure the provided file is readable'
-//     )
-//   }
-
-//   const size = await this.fileSize()
-
-//   if (size > 100 * 1024 * 1024) {
-//     // TODO: init multipart upload
-//     console.warn(`file size ${size} is larger`)
-//   }
-
-//   const { data: uri, err } = parseS3Uri(destination, {
-//     file: true
-//   })
-
-//   if (err.toString().startsWith('invalid-s3-uri')) {
-//     throw new Error(`failed-to-parse-s3-uri: ${err}`)
-//   }
-
-//   if (uri.file === '') {
-//     uri.file = path.basename(source)
-//     console.warn('Destination filename not provided. Using source source basename' + uri.file)
-//   }
-
-//   console.log(`uploading ${source} to ${destination}`)
-
-//   const s3 = s3Client({
-//     region: 'us-east-2'
-//   })
-
-//   const res = await s3
-//     .send(
-//       new PutObjectCommand({
-//         Bucket: uri.bucket,
-//         Key: uri.key + uri.file,
-//         Body: fStream
-//       })
-//     )
-//     .catch((err) => {
-//       /* eslint-disable @typescript-eslint/restrict-template-expressions */
-//       throw new Error(`failed-upload-s3: Error while uploading to S3: ${err}`)
-//     })
-//     .finally(() => {
-//       fStream.close()
-//     })
-
-//   if (res.$metadata.httpStatusCode !== undefined && res.$metadata.httpStatusCode !== 200) {
-//     throw new Error(`failed-upload-s3: Error while uploading to S3: ${res.$metadata.httpStatusCode}`)
-//   }
-
-//   if (res.$metadata.requestId === undefined) {
-//     throw new Error('failed-upload-s3')
-//   }
-
-//   return res.$metadata.requestId
-// }
-
-//   async initMultipartUpload (bucket: string, key: string): Promise<string> {
-//     const client = s3Client({
-//       credentials: credentials('default'),
-//       region: 'us-east-2'
-//     })
-
-//     const command = new CreateMultipartUploadCommand({
-//       Bucket: bucket,
-//       ContentEncoding: 'utf8',
-//       ContentType: 'text/csv',
-//       Key: key
-//     })
-
-//     const result = await client.send(command)
-
-//     if (result.UploadId === undefined || result.$metadata.httpStatusCode !== 200) {
-//       throw new Error('failed-multipart-upload')
-//     }
-
-//     if (result.UploadId === undefined) {
-//       throw new Error('failed-multipart-upload')
-//     }
-
-//     return result.UploadId
-//   }

@@ -2,22 +2,14 @@ import path, { join } from 'path'
 import os from 'os'
 import fs from 'fs'
 import { exec } from 'child_process'
-import { S3Client } from '@aws-sdk/client-s3'
-import { s3Client, credentials } from './plugin/s3'
 import util from 'util'
 
 const execify = util.promisify(exec)
 
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
-type env = 'local' | 's3'
-
-type connectorType = S3Client | fs.ReadStream
-type loaderType = S3Client | fs.WriteStream
-
-type catalogStateType = 'init' | 'transforming' | 'uploading' | 'cancelled' | 'uploaded' | 'ready'
-
 type Delimiter = ',' | '\t'
+type DataType = 'csv' | 'json' | 'tsv'
 
 interface Metadata {
   type: string
@@ -36,13 +28,13 @@ interface Metadata {
 
 export interface CatalogOptions {
   name: string
-  input: 'csv' | 'json'
+  input: DataType
   source: string
   destination: string
   columns: string[]
   header: boolean
   quotes: boolean
-  output: 'csv' | 'json'
+  output: DataType
   delimiter: Delimiter
 }
 
@@ -50,20 +42,12 @@ export class Catalog {
   name: string
   options: CatalogOptions
   metadata: Metadata
-  env: env
-  state: catalogStateType
-  connector: connectorType | null
-  loader: loaderType | null
   createdAt: Date
 
   constructor (options: CatalogOptions) {
     this.name = options.name !== '' ? options.name : path.basename(options.source)
     this.options = options
-    this.env = 'local'
     this.createdAt = new Date()
-    this.state = 'init'
-    this.connector = null
-    this.loader = null
     this.metadata = {
       type: '',
       columns: [],
@@ -104,9 +88,6 @@ export class Catalog {
     if (header.stderr !== '') {
       throw new Error(`failed-to-get-header-column: ${header.stderr}`)
     }
-
-    console.log(header)
-
     const columns = JSON.parse(header.stdout)
 
     if (columns.length === 0) {
@@ -147,44 +128,6 @@ export class Catalog {
     const stat = await fs.promises.stat(this.options.source)
     this.metadata.size = stat.size
   }
-
-  determineLoader (): void {
-    if (this.options.destination.startsWith('s3://')) {
-      this.loader = s3Client({
-        credentials: credentials('default'),
-        region: 'us-east-2'
-      })
-      return
-    }
-
-    if (
-      this.options.source.startsWith('/') || this.options.source.startsWith('../') || this.options.source.startsWith('./')) {
-      this.loader = fs.createWriteStream(this.options.destination)
-      return
-    }
-
-    throw new Error('unsupported-loader')
-  }
-
-  determineConnector (): void {
-    if (this.options.source.startsWith('/') || this.options.source.startsWith('../') || this.options.source.startsWith('./')) {
-      if (!fs.existsSync(this.options.source)) {
-        throw new Error(`file: ${this.options.source} not found, please provide a valid file path`)
-      }
-      this.connector = fs.createReadStream(this.options.source)
-      return
-    }
-
-    if (this.options.source.startsWith('s3://')) {
-      this.connector = s3Client({
-        credentials: credentials('default'),
-        region: 'us-east-2'
-      })
-      return
-    }
-
-    throw new Error(`unsupported-source for: ${this.options.source}`)
-  }
 }
 
 export async function createCatalog (query: String, opt: CatalogOptions): Promise<Catalog> {
@@ -212,8 +155,6 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
     const catalog = new Catalog(opt)
 
     Promise.all([
-      catalog.determineConnector(),
-      catalog.determineLoader(),
       catalog.headerColumn(),
       catalog.fileSize(),
       catalog.fileType(),

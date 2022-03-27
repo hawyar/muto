@@ -1,1 +1,365 @@
-var q=Object.create;var f=Object.defineProperty;var I=Object.getOwnPropertyDescriptor;var N=Object.getOwnPropertyNames;var z=Object.getPrototypeOf,L=Object.prototype.hasOwnProperty;var v=n=>f(n,"__esModule",{value:!0});var B=(n,t)=>{for(var o in t)f(n,o,{get:t[o],enumerable:!0})},S=(n,t,o,e)=>{if(t&&typeof t=="object"||typeof t=="function")for(let r of N(t))!L.call(n,r)&&(o||r!=="default")&&f(n,r,{get:()=>t[r],enumerable:!(e=I(t,r))||e.enumerable});return n},p=(n,t)=>S(v(f(n!=null?q(z(n)):{},"default",!t&&n&&n.__esModule?{get:()=>n.default,enumerable:!0}:{value:n,enumerable:!0})),n),D=(n=>(t,o)=>n&&n.get(t)||(o=S(v({}),t,1),n&&n.set(t,o),o))(typeof WeakMap!="undefined"?new WeakMap:0);var a=(n,t,o)=>new Promise((e,r)=>{var l=s=>{try{m(o.next(s))}catch(i){r(i)}},c=s=>{try{m(o.throw(s))}catch(i){r(i)}},m=s=>s.done?e(s.value):Promise.resolve(s.value).then(l,c);m((o=o.apply(n,t)).next())});var X={};B(X,{query:()=>J});var h=p(require("path"),1),y=p(require("os"),1),d=p(require("fs"),1),b=require("child_process");var x=require("@aws-sdk/credential-providers"),E=require("@aws-sdk/client-s3"),g=n=>(0,x.fromIni)({profile:n,mfaCodeProvider:t=>a(void 0,null,function*(){return t})});function w(n){return new E.S3Client(n)}var O=p(require("util"),1),C=O.default.promisify(b.exec),$=(0,h.join)(process.cwd(),"node_modules",".bin","mlr@v6.0.0"),P=class{constructor(t){this.name=t.name!==""?t.name:h.default.basename(t.source),this.options=t,this.env="local",this.createdAt=new Date,this.state="init",this.connector=null,this.loader=null,this.metadata={type:"",columns:[],header:!1,extension:"",size:0,rowCount:0,spanMultipleLines:!1,quotes:!1,delimiter:",",errors:{},warnings:{}}}rowCount(){return a(this,null,function*(){let t=yield C(`${$} --ojson count ${this.options.source}`);if(t.stderr!=="")throw new Error(`failed-to-get-row-count: ${t.stderr}`);let o=JSON.parse(t.stdout);if(o.length===0)throw new Error("failed-to-get-row-count: no rows found");if(o[0].count===void 0)throw new Error("failed-to-get-row-count: no count found");this.metadata.rowCount=o[0].count})}headerColumn(){return a(this,null,function*(){let t=yield C(`${$} --icsv --ojson head -n 1 ${this.options.source}`);if(t.stderr!=="")throw new Error(`failed-to-get-header-column: ${t.stderr}`);console.log(t);let o=JSON.parse(t.stdout);if(o.length===0)throw new Error("failed-to-get-header-column: no columns found");this.metadata.columns=Object.keys(o[0])})}fileType(){return a(this,null,function*(){if(y.default.platform()!=="linux"&&y.default.platform()!=="darwin")throw new Error("unsupported-platform");let t=yield C(`file ${this.options.source} --mime-type`);if(t.stderr!=="")throw new Error(`failed-to-detect-mime-type: ${t.stderr}`);let o=t.stdout.split(":")[1].trim();if(o==="")throw new Error("failed-to-detect-mime-type");this.options.source.endsWith(".csv")&&(this.metadata.extension="csv"),this.options.source.endsWith(".json")&&(this.metadata.extension="json"),this.metadata.type=o})}fileSize(){return a(this,null,function*(){let t=yield d.default.promises.stat(this.options.source);this.metadata.size=t.size})}determineLoader(){if(this.options.destination.startsWith("s3://")){this.loader=w({credentials:g("default"),region:"us-east-2"});return}if(this.options.source.startsWith("/")||this.options.source.startsWith("../")||this.options.source.startsWith("./")){this.loader=d.default.createWriteStream(this.options.destination);return}throw new Error("unsupported-loader")}determineConnector(){if(this.options.source.startsWith("/")||this.options.source.startsWith("../")||this.options.source.startsWith("./")){if(!d.default.existsSync(this.options.source))throw new Error(`file: ${this.options.source} not found, please provide a valid file path`);this.connector=d.default.createReadStream(this.options.source);return}if(this.options.source.startsWith("s3://")){this.connector=w({credentials:g("default"),region:"us-east-2"});return}throw new Error(`unsupported-source for: ${this.options.source}`)}};function R(n,t){return a(this,null,function*(){return yield new Promise((o,e)=>{(t.source===""||t.source===void 0)&&e(new Error("failed-to-create-catalog: no source provided")),(t.destination===""||t.destination===void 0)&&e(new Error("failed-to-create-catalog: no destination provided")),(t.name===""||t.name===void 0)&&e(new Error("failed-to-create-catalog: no name provided")),t.input==="csv"&&!t.source.endsWith(".csv")&&e(new Error("failed-to-create-catalog: file extension does not match input type")),t.input==="json"&&!t.source.endsWith(".json")&&e(new Error("failed-to-create-catalog: file extension does not match input type"));let r=new P(t);Promise.all([r.determineConnector(),r.determineLoader(),r.headerColumn(),r.fileSize(),r.fileType(),r.rowCount()]).then(()=>{console.log(`created catalog for: ${t.name}`),o(r)}).catch(l=>e(l))})})}var A=require("child_process");var T=require("pgsql-parser"),_=class{constructor(){this.query="",this.stmt={type:"",distinct:!1,columns:[{name:"",type:""}],from:[{schemaname:"",relname:"",inh:""}],sort:{},where:{},group:[],having:[],orderBy:[],limit:{type:"",val:""}}}parse(t){var l,c,m;if(t.trim()==="")throw new Error("invalid-query: no query found");console.log(`raw: ${t}`);let o=(0,T.parse)(t);Object.keys(o[0].RawStmt.stmt)[0]==="SelectStmt"&&(this.stmt.type="select");let e=o[0].RawStmt.stmt.SelectStmt,r=e.limitOption;if(r==="LIMIT_OPTION_DEFAULT"&&(this.stmt.limit={type:e.limitOption,val:""}),r==="LIMIT_OPTION_COUNT"&&e.limitCount!==""&&(this.stmt.limit={type:e.limitOption,val:e.limitCount.A_Const.val.Integer.ival}),e.distinctClause!==void 0&&(this.stmt.distinct=!0),e.targetList!==void 0&&(this.stmt.columns=e.targetList.map(s=>{let i=s.ResTarget.val.ColumnRef.fields[0];return i.A_Star!==void 0?{name:"*"}:{name:i.String.str}})),this.stmt.from=e.fromClause.map(s=>{let i={schemaname:"",relname:"",inh:""},u=s.RangeVar;return u.schemaname!==void 0&&(i.schemaname=u.schemaname),u.relname!==void 0&&(i.relname=u.relname),u.inh!==void 0&&(i.inh=u.inh),i}),e.whereClause!==void 0){if(e.whereClause!==null&&((l=e==null?void 0:e.whereClause)==null?void 0:l.A_Expr.kind)==="AEXPR_OP"){let s=e.whereClause.A_Expr,i={operator:"",left:{},right:{}};i.operator=s.name[0].String.str,s.lexpr!==null&&(i.left=s.lexpr.ColumnRef.fields[0].String.str),s.rexpr!==null&&(i.right=s.rexpr.ColumnRef.fields[0].String.str),this.stmt.where=i}if(((c=e==null?void 0:e.whereClause)==null?void 0:c.A_Expr)!==null&&((m=e==null?void 0:e.whereClause)==null?void 0:m.A_Expr.kind)==="AEXPR_IN"){let s=e.whereClause.A_Expr;console.log(s)}if(e.whereClause.BoolExpr!==null){if(e.whereClause.BoolExpr.boolop==="AND_EXPR"){let s=e.whereClause.BoolExpr.args;console.log(JSON.stringify(s,null,2))}if(e.whereClause.BoolExpr.boolop==="OR_EXPR"){let s=e.whereClause.BoolExpr.args;console.log(JSON.stringify(s,null,2))}}}return this.stmt}};function W(n){return new _().parse(n)}var j=require("path"),M=(0,j.join)(process.cwd(),"node_modules",".bin","mlr@v6.0.0");function J(n,t){return a(this,null,function*(){let o=W(n),e=yield R(n,t);if(e==null)throw new Error("failed-to-create-catalog");console.log(`created catalog for: ${e.name}`);let r=new k(e,o).analyze();console.log(`plan: ${JSON.stringify(r,null,2)}`);let{stdout:l,stderr:c}=(0,A.exec)(r.cmd+" "+r.args.join(" "));console.log(`stdout: ${l}`),console.log(`stderr: ${c}`)})}var k=class{constructor(t,o){this.stmt=o,this.catalog=t,this.plan={cmd:"",args:[]}}analyze(){if(console.log("analyzing query"),this.plan.cmd=M,this.stmt.type!=="select")throw new Error("not-implemented: only select queries are supported at this time");if(console.log(this.stmt),this.stmt.from.length===1){let t=this.stmt.from[0].relname;console.log("from table: ",t);let o=this.catalog.options.source;if(this.stmt.columns.length===1){if(this.stmt.columns[0].name==="*")return this.plan.args=["--icsv","--ojson","cat",o],this.plan;this.plan.args=["--icsv","--ojson","cut","-f",this.stmt.columns[0].name,o]}if(this.stmt.columns.length>1){let e=this.stmt.columns.map(r=>r.name).join(",");return console.log("fields: ",e),this.plan.args=["--icsv","--ojson","cut","-o","-f",e,o],this.plan}}return this.plan}};module.exports=D(X);0&&(module.exports={query});
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __reExport = (target, module2, copyDefault, desc) => {
+  if (module2 && typeof module2 === "object" || typeof module2 === "function") {
+    for (let key of __getOwnPropNames(module2))
+      if (!__hasOwnProp.call(target, key) && (copyDefault || key !== "default"))
+        __defProp(target, key, { get: () => module2[key], enumerable: !(desc = __getOwnPropDesc(module2, key)) || desc.enumerable });
+  }
+  return target;
+};
+var __toESM = (module2, isNodeMode) => {
+  return __reExport(__markAsModule(__defProp(module2 != null ? __create(__getProtoOf(module2)) : {}, "default", !isNodeMode && module2 && module2.__esModule ? { get: () => module2.default, enumerable: true } : { value: module2, enumerable: true })), module2);
+};
+var __toCommonJS = /* @__PURE__ */ ((cache) => {
+  return (module2, temp) => {
+    return cache && cache.get(module2) || (temp = __reExport(__markAsModule({}), module2, 1), cache && cache.set(module2, temp), temp);
+  };
+})(typeof WeakMap !== "undefined" ? /* @__PURE__ */ new WeakMap() : 0);
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+
+// lib/engine.ts
+var engine_exports = {};
+__export(engine_exports, {
+  parseStmt: () => parseStmt,
+  query: () => query
+});
+
+// lib/catalog.ts
+var import_path = __toESM(require("path"), 1);
+var import_os = __toESM(require("os"), 1);
+var import_fs = __toESM(require("fs"), 1);
+var import_child_process = require("child_process");
+var import_util = __toESM(require("util"), 1);
+var execify = import_util.default.promisify(import_child_process.exec);
+var mlr = (0, import_path.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+var Catalog = class {
+  constructor(options) {
+    this.name = options.name !== "" ? options.name : import_path.default.basename(options.source);
+    this.options = options;
+    this.createdAt = new Date();
+    this.metadata = {
+      type: "",
+      columns: [],
+      header: false,
+      extension: "",
+      size: 0,
+      rowCount: 0,
+      spanMultipleLines: false,
+      quotes: false,
+      delimiter: ",",
+      errors: {},
+      warnings: {}
+    };
+  }
+  rowCount() {
+    return __async(this, null, function* () {
+      const rCount = yield execify(`${mlr} --ojson count ${this.options.source}`);
+      if (rCount.stderr !== "") {
+        throw new Error(`failed-to-get-row-count: ${rCount.stderr}`);
+      }
+      const rowCount = JSON.parse(rCount.stdout);
+      if (rowCount.length === 0) {
+        throw new Error("failed-to-get-row-count: no rows found");
+      }
+      if (rowCount[0].count === void 0) {
+        throw new Error("failed-to-get-row-count: no count found");
+      }
+      this.metadata.rowCount = rowCount[0].count;
+    });
+  }
+  headerColumn() {
+    return __async(this, null, function* () {
+      const header = yield execify(`${mlr} --icsv --ojson head -n 1 ${this.options.source}`);
+      if (header.stderr !== "") {
+        throw new Error(`failed-to-get-header-column: ${header.stderr}`);
+      }
+      const columns = JSON.parse(header.stdout);
+      if (columns.length === 0) {
+        throw new Error("failed-to-get-header-column: no columns found");
+      }
+      this.metadata.columns = Object.keys(columns[0]);
+    });
+  }
+  fileType() {
+    return __async(this, null, function* () {
+      if (import_os.default.platform() !== "linux" && import_os.default.platform() !== "darwin") {
+        throw new Error("unsupported-platform");
+      }
+      const mime = yield execify(`file ${this.options.source} --mime-type`);
+      if (mime.stderr !== "") {
+        throw new Error(`failed-to-detect-mime-type: ${mime.stderr}`);
+      }
+      const type = mime.stdout.split(":")[1].trim();
+      if (type === "") {
+        throw new Error("failed-to-detect-mime-type");
+      }
+      if (this.options.source.endsWith(".csv")) {
+        this.metadata.extension = "csv";
+      }
+      if (this.options.source.endsWith(".json")) {
+        this.metadata.extension = "json";
+      }
+      this.metadata.type = type;
+    });
+  }
+  fileSize() {
+    return __async(this, null, function* () {
+      const stat = yield import_fs.default.promises.stat(this.options.source);
+      this.metadata.size = stat.size;
+    });
+  }
+};
+function createCatalog(query2, opt) {
+  return __async(this, null, function* () {
+    return yield new Promise((resolve, reject) => {
+      if (opt.source === "" || opt.source === void 0) {
+        reject(new Error("failed-to-create-catalog: no source provided"));
+      }
+      if (opt.destination === "" || opt.destination === void 0) {
+        reject(new Error("failed-to-create-catalog: no destination provided"));
+      }
+      if (opt.name === "" || opt.name === void 0) {
+        reject(new Error("failed-to-create-catalog: no name provided"));
+      }
+      if (opt.input === "csv" && !opt.source.endsWith(".csv")) {
+        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      }
+      if (opt.input === "json" && !opt.source.endsWith(".json")) {
+        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      }
+      const catalog = new Catalog(opt);
+      Promise.all([
+        catalog.headerColumn(),
+        catalog.fileSize(),
+        catalog.fileType(),
+        catalog.rowCount()
+      ]).then(() => {
+        console.log(`created catalog for: ${opt.name}`);
+        resolve(catalog);
+      }).catch((err) => reject(err));
+    });
+  });
+}
+
+// lib/engine.ts
+var import_child_process2 = require("child_process");
+
+// lib/parser.ts
+var import_pgsql_parser = require("pgsql-parser");
+var Parser = class {
+  constructor() {
+    this.query = "";
+    this.stmt = {
+      type: "",
+      distinct: false,
+      columns: [{
+        name: "",
+        type: ""
+      }],
+      from: [{
+        schemaname: "",
+        relname: "",
+        inh: ""
+      }],
+      sort: {},
+      where: {},
+      group: [],
+      having: [],
+      orderBy: [],
+      limit: {
+        type: "",
+        val: ""
+      }
+    };
+  }
+  parse(raw) {
+    var _a, _b;
+    if (raw.trim() === "") {
+      throw new Error("invalid-query: no query found");
+    }
+    console.log(`raw: ${raw}`);
+    const rawAST = (0, import_pgsql_parser.parse)(raw);
+    if (Object.keys(rawAST[0].RawStmt.stmt)[0] === "SelectStmt") {
+      this.stmt.type = "select";
+    }
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt;
+    const limit = ast.limitOption;
+    if (limit === "LIMIT_OPTION_DEFAULT") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ""
+      };
+    }
+    if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ast.limitCount.A_Const.val.Integer.ival
+      };
+    }
+    if (ast.distinctClause !== void 0) {
+      this.stmt.distinct = true;
+    }
+    if (ast.targetList !== void 0) {
+      this.stmt.columns = ast.targetList.map((t) => {
+        const col = t.ResTarget.val.ColumnRef.fields[0];
+        if (col.A_Star !== void 0) {
+          return {
+            name: "*"
+          };
+        }
+        return {
+          name: col.String.str
+        };
+      });
+    }
+    if (ast.fromClause !== void 0) {
+      this.stmt.from = ast.fromClause.map((from) => {
+        const source = {
+          schemaname: "",
+          relname: "",
+          inh: ""
+        };
+        const t = from.RangeVar;
+        if (t.schemaname !== void 0) {
+          source.schemaname = t.schemaname;
+        }
+        if (t.relname !== void 0) {
+          source.relname = t.relname;
+        }
+        if (t.inh !== void 0) {
+          source.inh = t.inh;
+        }
+        return source;
+      });
+    }
+    if (ast.whereClause !== void 0) {
+      if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
+        const expr = ast.whereClause.A_Expr;
+        const where = {
+          operator: "",
+          left: {},
+          right: {}
+        };
+        where.operator = expr.name[0].String.str;
+        if (expr.lexpr !== void 0) {
+          where.left = expr.lexpr.ColumnRef.fields[0].String.str;
+        }
+        if (expr.rexpr !== void 0) {
+          if (expr.rexpr.ColumnRef !== void 0 && Object.keys(expr.rexpr.ColumnRef.fields[0]).includes("String")) {
+            where.right = expr.rexpr.ColumnRef.fields[0].String.str;
+          }
+          if (expr.rexpr.A_Const !== void 0) {
+            where.right = expr.rexpr.A_Const.val.Integer.ival;
+          }
+        }
+        this.stmt.where = where;
+      }
+      if (ast.whereClause.A_Expr !== void 0 && ((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr.kind) === "AEXPR_IN") {
+      }
+      if (ast.whereClause.BoolExpr !== void 0) {
+        if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
+        }
+        if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
+        }
+      }
+    }
+    return this.stmt;
+  }
+};
+function parseStmt(query2) {
+  return new Parser().parse(query2);
+}
+
+// lib/engine.ts
+var import_path2 = require("path");
+var import_fs2 = require("fs");
+var mlr2 = (0, import_path2.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+function query(query2, opt) {
+  return __async(this, null, function* () {
+    const catalog = yield createCatalog(query2, opt);
+    if (catalog == null) {
+      throw new Error("failed-to-create-catalog");
+    }
+    const plan = new Analyzer(catalog, parseStmt(query2)).analyze();
+    console.log(JSON.stringify(catalog, null, 2));
+    const { stdout } = (0, import_child_process2.exec)(plan.cmd + " " + plan.args.join(" "));
+    if (stdout === null) {
+      throw new Error("failed-to-execute-query");
+    }
+    stdout.pipe((0, import_fs2.createWriteStream)(catalog.options.destination));
+    console.log(plan);
+  });
+}
+var Analyzer = class {
+  constructor(catalog, stmt) {
+    this.stmt = stmt;
+    this.catalog = catalog;
+    this.plan = {
+      cmd: "",
+      args: []
+    };
+  }
+  analyze() {
+    console.log("analyzing query");
+    this.plan.cmd = mlr2;
+    if (this.stmt.type !== "select") {
+      throw new Error("not-implemented: only select queries are supported at this time");
+    }
+    if (this.stmt.from.length === 1) {
+      const table = this.stmt.from[0].relname;
+      console.log("from table: ", table);
+      const source = this.catalog.options.source;
+      const destination = this.catalog.options.destination;
+      console.log("destination: ", destination);
+      if (this.stmt.columns.length === 1) {
+        if (this.stmt.columns[0].name === "*") {
+          this.plan.args = ["--icsv", "--ojson", "cat", source];
+          return this.plan;
+        }
+        this.plan.args = ["--icsv", "--ojson", "cut", "-f", this.stmt.columns[0].name, source];
+      }
+      if (this.stmt.columns.length > 1) {
+        const fields = this.stmt.columns.map((col) => col.name).join(",");
+        console.log("fields: ", fields);
+        this.plan.args = ["--icsv", "--ojson", "cut", "-o", "-f", fields, source];
+        return this.plan;
+      }
+    }
+    return this.plan;
+  }
+};
+module.exports = __toCommonJS(engine_exports);
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  parseStmt,
+  query
+});

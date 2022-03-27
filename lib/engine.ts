@@ -1,29 +1,32 @@
 import { createCatalog, CatalogOptions, Catalog } from './catalog'
 import { exec } from 'child_process'
-import { parseQuery, Stmt } from './parser'
+import { parseStmt, Stmt } from './parser'
 import { join } from 'path'
+import { createWriteStream } from 'fs'
+export { parseStmt, Stmt } from './parser'
 
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 export async function query (query: string, opt: CatalogOptions): Promise<void> {
-  const ast = parseQuery(query)
-
   const catalog = await createCatalog(query, opt)
 
   if (catalog == null) {
     throw new Error('failed-to-create-catalog')
   }
 
-  console.log(`created catalog for: ${catalog.name}`)
+  const plan = new Analyzer(catalog, parseStmt(query)).analyze()
 
-  const plan = new Analyzer(catalog, ast).analyze()
+  console.log(JSON.stringify(catalog, null, 2))
 
-  console.log(`plan: ${JSON.stringify(plan, null, 2)}`)
+  const { stdout } = exec(plan.cmd + ' ' + plan.args.join(' '))
 
-  const { stdout, stderr } = exec(plan.cmd + ' ' + plan.args.join(' '))
+  if (stdout === null) {
+    throw new Error('failed-to-execute-query')
+  }
 
-  console.log(`stdout: ${stdout}`)
-  console.log(`stderr: ${stderr}`)
+  stdout.pipe(createWriteStream(catalog.options.destination))
+
+  console.log(plan)
 }
 
 interface ExecutePlan {
@@ -53,14 +56,15 @@ class Analyzer {
       throw new Error('not-implemented: only select queries are supported at this time')
     }
 
-    console.log(this.stmt)
-
     if (this.stmt.from.length === 1) {
       const table = this.stmt.from[0].relname
       console.log('from table: ', table)
 
       const source = this.catalog.options.source
-      // const destination = this.catalog.options.destination
+      const destination = this.catalog.options.destination
+
+      console.log('destination: ', destination)
+
       if (this.stmt.columns.length === 1) {
         if (this.stmt.columns[0].name === '*') {
           this.plan.args = ['--icsv', '--ojson', 'cat', source]
