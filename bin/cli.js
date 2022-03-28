@@ -5,19 +5,26 @@ import pc from "picocolors"
 import picocolors from 'picocolors'
 
 const usage = `
-${pc.bold('Usage:')}:
+${pc.bold('Usage:')}
     muto [command] [arg] [flags]
 
-${pc.bold(`Commands:`)}: 
+${pc.bold(`Commands:`)}
     query   Query data using SQL
 
-    Flags:
-      -s    --source        Path to the source file ${pc.bold('(required)')}
-      -d    --destination   Destination of the processed file ${pc.bold('(required)')}
-      -i    --input         Input format ${pc.bold('default: csv')} (csv, json, xml, etc.) 
-      -o    --output        Output format ${pc.bold('default: csv')}
-      -n    --name          Name of the query ${pc.bold('default: file name')}
-      -v    --version       Print version
+${pc.bold(`Flags:`)}
+    -s    --source        Path to the source file ${pc.bold('(required)')}
+    -d    --destination   Destination of the processed file ${pc.bold('(required)')}
+
+    -i    --input         Input format ${pc.bold('default: csv')} (csv, json, xml, etc.) 
+    -o    --output        Output format ${pc.bold('default: csv')}
+
+    -n    --name          Name of the query ${pc.bold('default: file name')}
+
+    -v    --version       Print version
+    -h    --help          Print help (what you are reading now)
+  
+${pc.bold(`Example:`)} 
+    muto query "select id, track from albums" -s /path/to/file.csv -d ./result.json
 `
 
 const args = arg({
@@ -51,26 +58,27 @@ async function run () {
 
   if (args._.length === 0) {
     print(picocolors.red(`Error: Missing command, see ${pc.bold('muto --help')}`))
-    process.exit(1)
+    process.exit(0)
   }
 
   if (args._.length !== 2) {
-    print(`Missing command ${usage}`)
-    process.exit(1)
+    print(picocolors.red(`Error: Missing command argument, see ${pc.bold('muto --help')}`))
+    process.exit(0)
   }
 
   if (args._[0] !== 'query') {
-    print('Invalid command')
+    print(picocolors.red(`Error: Unknown command, see ${pc.bold('muto --help')}`))
+    process.exit(0)
   }
 
   if (!args['--source']) {
-    print('Missing source')
-    process.exit(1)
+    print(picocolors.red(`Error: Missing source, see ${pc.bold('muto --help')}`))
+    process.exit(0)
   }
 
   if (!args['--destination']) {
-    print('Missing destination')
-    process.exit(1)
+    print(picocolors.red(`Error: Missing destination, see ${pc.bold('muto --help')}`))
+    process.exit(0)
   }
 
   const input = {
@@ -81,32 +89,24 @@ async function run () {
     destination: args['--destination']
   }
 
-  if (args._[1] === '') {
-    print('Missing query')
+    if (args._[1] === '') {
+    print(picocolors.red(`Error: Missing query, see ${pc.bold('muto --help')}`))
     process.exit(1)
   }
-
-  // await query("select * from albums", {
-  //   name: 'albums',
-  //   input: 'csv',
-  //   // source: '/Users/hawyar/Personal/ares/tests/fixtures/albums.csv',
-  //   // source: "/Users/hawyar/Downloads/MUP_PHY_R21_P04_V10_D19_Prov.csv",
-  //   source: "/Users/hawyar/Downloads/redbull.csv",
-  //   output: 'json',
-  //   destination: './beep22.json',
-  // })
 
   await query(args._[1], input)
   process.exit(0)
 }
 
+
+run().catch(console.error)
+
+
 function print (msg) {
   typeof msg === 'string'
     ? process.stdout.write(`${msg} \n`)
-    : process.stdout.write(`${JSON.stringify(msg, null, 2)}\n`)
+    : process.stdout.write(`${JSON.stringify(msg, null, 2)} \n`)
 }
-
-run().catch(console.error)
 
 process.on('unhandledRejection', (reason, promise) => {
   print(reason)

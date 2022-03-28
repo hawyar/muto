@@ -11,6 +11,12 @@ tap.test('select field1, field2', async (t) => {
   t.end()
 })
 
+tap.test('select "FIELD"', async (t) => {
+  t.same('WEEKLY_RATINGS',parseStmt('select player_name, "WEEKLY_RATINGS" from season_2021').columns[1].name)
+  t.end()
+})
+
+
 tap.test('distinct clause', async (t) => {
   t.same(true, parseStmt('select distinct id, name from t.users').distinct)
   t.end()

@@ -82,7 +82,7 @@ export class Catalog {
     this.metadata.rowCount = rowCount[0].count
   }
 
-  async headerColumn (): Promise<void> {
+  async columnHeader (): Promise<void> {
     const header = await execify(`${mlr} --icsv --ojson head -n 1 ${this.options.source}`)
 
     if (header.stderr !== '') {
@@ -93,7 +93,11 @@ export class Catalog {
     if (columns.length === 0) {
       throw new Error('failed-to-get-header-column: no columns found')
     }
-    this.metadata.columns = Object.keys(columns[0])
+    this.metadata.columns = this.sanitizeColumnNames(Object.keys(columns[0]))
+  }
+
+  sanitizeColumnNames (columns: string[]): string[] {
+    return columns.map(column => column.replace(/[^a-zA-Z0-9]/g, '_'))
   }
 
   async fileType (): Promise<void> {
@@ -132,15 +136,18 @@ export class Catalog {
 
 export async function createCatalog (query: String, opt: CatalogOptions): Promise<Catalog> {
   return await new Promise((resolve, reject) => {
-    if (opt.source === '' || opt.source === undefined) {
+    if (opt === undefined) {
+      reject(new Error('missing-catalog-options'))
+    }
+    if (opt.source === undefined || opt.source === '') {
       reject(new Error('failed-to-create-catalog: no source provided'))
     }
 
-    if (opt.destination === '' || opt.destination === undefined) {
+    if (opt.destination === undefined || opt.destination === '') {
       reject(new Error('failed-to-create-catalog: no destination provided'))
     }
 
-    if (opt.name === '' || opt.name === undefined) {
+    if (opt.name === undefined || opt.name === '') {
       reject(new Error('failed-to-create-catalog: no name provided'))
     }
 
@@ -155,7 +162,7 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
     const catalog = new Catalog(opt)
 
     Promise.all([
-      catalog.headerColumn(),
+      catalog.columnHeader(),
       catalog.fileSize(),
       catalog.fileType(),
       catalog.rowCount()

@@ -36,7 +36,8 @@ export declare class Catalog {
     createdAt: Date;
     constructor(options: CatalogOptions);
     rowCount(): Promise<void>;
-    headerColumn(): Promise<void>;
+    columnHeader(): Promise<void>;
+    sanitizeColumnNames(columns: string[]): string[];
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
 }

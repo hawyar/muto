@@ -3,8 +3,8 @@ import { exec } from 'child_process'
 import { parseStmt, Stmt } from './parser'
 import { join } from 'path'
 import { createWriteStream } from 'fs'
-export { parseStmt, Stmt } from './parser'
-
+export { parseStmt } from './parser'
+export { createCatalog } from './catalog'
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 export async function query (query: string, opt: CatalogOptions): Promise<void> {
@@ -18,15 +18,18 @@ export async function query (query: string, opt: CatalogOptions): Promise<void> 
 
   console.log(JSON.stringify(catalog, null, 2))
 
-  const { stdout } = exec(plan.cmd + ' ' + plan.args.join(' '))
+  const { stdout } = exec(plan.cmd + ' ' + plan.args.join(' '), {
+    maxBuffer: 1024 * 1024 * 1024
+  })
 
   if (stdout === null) {
     throw new Error('failed-to-execute-query')
   }
 
+  stdout.on('close', () => {
+    console.log('done')
+  })
   stdout.pipe(createWriteStream(catalog.options.destination))
-
-  console.log(plan)
 }
 
 interface ExecutePlan {

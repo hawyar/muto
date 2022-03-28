@@ -49,6 +49,7 @@ var __async = (__this, __arguments, generator) => {
 // lib/engine.ts
 var engine_exports = {};
 __export(engine_exports, {
+  createCatalog: () => createCatalog,
   parseStmt: () => parseStmt,
   query: () => query
 });
@@ -96,7 +97,7 @@ var Catalog = class {
       this.metadata.rowCount = rowCount[0].count;
     });
   }
-  headerColumn() {
+  columnHeader() {
     return __async(this, null, function* () {
       const header = yield execify(`${mlr} --icsv --ojson head -n 1 ${this.options.source}`);
       if (header.stderr !== "") {
@@ -106,8 +107,11 @@ var Catalog = class {
       if (columns.length === 0) {
         throw new Error("failed-to-get-header-column: no columns found");
       }
-      this.metadata.columns = Object.keys(columns[0]);
+      this.metadata.columns = this.sanitizeColumnNames(Object.keys(columns[0]));
     });
+  }
+  sanitizeColumnNames(columns) {
+    return columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
   }
   fileType() {
     return __async(this, null, function* () {
@@ -141,13 +145,16 @@ var Catalog = class {
 function createCatalog(query2, opt) {
   return __async(this, null, function* () {
     return yield new Promise((resolve, reject) => {
-      if (opt.source === "" || opt.source === void 0) {
+      if (opt === void 0) {
+        reject(new Error("missing-catalog-options"));
+      }
+      if (opt.source === void 0 || opt.source === "") {
         reject(new Error("failed-to-create-catalog: no source provided"));
       }
-      if (opt.destination === "" || opt.destination === void 0) {
+      if (opt.destination === void 0 || opt.destination === "") {
         reject(new Error("failed-to-create-catalog: no destination provided"));
       }
-      if (opt.name === "" || opt.name === void 0) {
+      if (opt.name === void 0 || opt.name === "") {
         reject(new Error("failed-to-create-catalog: no name provided"));
       }
       if (opt.input === "csv" && !opt.source.endsWith(".csv")) {
@@ -158,7 +165,7 @@ function createCatalog(query2, opt) {
       }
       const catalog = new Catalog(opt);
       Promise.all([
-        catalog.headerColumn(),
+        catalog.columnHeader(),
         catalog.fileSize(),
         catalog.fileType(),
         catalog.rowCount()
@@ -311,12 +318,16 @@ function query(query2, opt) {
     }
     const plan = new Analyzer(catalog, parseStmt(query2)).analyze();
     console.log(JSON.stringify(catalog, null, 2));
-    const { stdout } = (0, import_child_process2.exec)(plan.cmd + " " + plan.args.join(" "));
+    const { stdout } = (0, import_child_process2.exec)(plan.cmd + " " + plan.args.join(" "), {
+      maxBuffer: 1024 * 1024 * 1024
+    });
     if (stdout === null) {
       throw new Error("failed-to-execute-query");
     }
+    stdout.on("close", () => {
+      console.log("done");
+    });
     stdout.pipe((0, import_fs2.createWriteStream)(catalog.options.destination));
-    console.log(plan);
   });
 }
 var Analyzer = class {
@@ -360,6 +371,7 @@ var Analyzer = class {
 module.exports = __toCommonJS(engine_exports);
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  createCatalog,
   parseStmt,
   query
 });
