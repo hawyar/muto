@@ -63,6 +63,22 @@ export class Catalog {
     }
   }
 
+  getName (): string {
+    return this.name
+  }
+
+  getOptions (): CatalogOptions {
+    return this.options
+  }
+
+  getMetadata (): Metadata {
+    return this.metadata
+  }
+
+  getColumns (): string[] {
+    return this.metadata.columns
+  }
+
   async rowCount (): Promise<void> {
     const rCount = await execify(`${mlr} --ojson count ${this.options.source}`)
 
@@ -147,19 +163,24 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
       reject(new Error('failed-to-create-catalog: no destination provided'))
     }
 
+    const catalogOptions = Object.assign({}, opt)
+
     if (opt.name === undefined || opt.name === '') {
-      reject(new Error('failed-to-create-catalog: no name provided'))
+      catalogOptions.name = path.basename(catalogOptions.source).split('.')[0]
     }
 
-    if (opt.input === 'csv' && !opt.source.endsWith('.csv')) {
-      reject(new Error('failed-to-create-catalog: file extension does not match input type'))
+    if (opt.input === undefined) {
+      const assumeType = path.extname(opt.source) === '.csv' ? 'csv' : 'json'
+      console.warn(`no-input-type-provided: assuming ${assumeType}`)
+      catalogOptions.input = assumeType
     }
 
-    if (opt.input === 'json' && !opt.source.endsWith('.json')) {
-      reject(new Error('failed-to-create-catalog: file extension does not match input type'))
+    if (opt.output === undefined) {
+      const assumeType = path.extname(opt.destination) === '.csv' ? 'csv' : 'json'
+      console.warn(`no-output-type-provided: assuming ${assumeType}`)
+      catalogOptions.output = assumeType
     }
-
-    const catalog = new Catalog(opt)
+    const catalog = new Catalog(catalogOptions)
 
     Promise.all([
       catalog.columnHeader(),
@@ -168,7 +189,7 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
       catalog.rowCount()
     ])
       .then(() => {
-        console.log(`created catalog for: ${opt.name}`)
+        console.log(`created catalog: ${catalog.getName()}`)
         resolve(catalog)
       })
       .catch((err) => reject(err))

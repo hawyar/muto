@@ -5,13 +5,11 @@ import { fileURLToPath } from 'url'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-tap.test('select *', async (t) => {
-  // await query(`select "Order ID, "Item Type" from albums`, {
+tap.test('select Country, "Order ID" from sales', async (t) => {
+  // await query(`select "Order ID" from sales`, {
   //   name: 'sales',
-  //   input: 'csv',
-  //   source: "./sales.csv",
-  //   output: 'json',
-  //   destination: './sales.json',
+  //   source: path.join(dirname, 'fixture', 'sales.csv'),
+  //   destination: path.join(dirname, 'fixture', 'sales.json'),
   // })
   t.ok("ok for now")
   t.end()

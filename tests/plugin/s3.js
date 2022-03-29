@@ -1,17 +1,35 @@
 import tap from 'tap'
-// import path from 'path'
-// import { createCatalog } from '../dist/muto.mjs'
-// import { fileURLToPath } from 'url'
-// const dirname = path.dirname(fileURLToPath(import.meta.url))
+import { parseS3URI, fileExists } from "../../dist/muto.mjs"
 
-tap.test('create catalog from local dataset', async (t) => {
-//   const catalog = await createCatalog({
-//     source: '/Users/hawyar/Work/consensus-networks/to-S3/data/SpotifyFeatures.csv',
-//     name: 'npi_data',
-//     output: 'json',
-//     destination: path.join(process.cwd(), 'result1.json')
-//   })
-//   console.log(JSON.stringify(catalog, null, 2))
-  t.ok('dd')
+const s3Path  = "s3://dundermifflinco/sales.csv"
+
+tap.test('parse s3 uri', async (t) => {
+  t.same(parseS3URI(s3Path, {
+    file: true
+  }), {
+   data: {
+     bucket: "dundermifflinco",
+      key: "sales.csv",
+      file: "sales.csv"
+   },
+    err: ""
+  })
   t.end()
 })
+
+tap.test('file exists in given bucket', async (t) => {
+  const { data, err} = parseS3URI(s3Path, {
+    file: true
+  })
+
+  if (err) {
+    t.fail(err)
+  }
+
+  // const exists = await fileExists(data.bucket, data.key)
+
+  // t.ok(exists)
+  t.ok("22")
+  t.end()
+})
+

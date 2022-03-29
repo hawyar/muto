@@ -35,6 +35,10 @@ export declare class Catalog {
     metadata: Metadata;
     createdAt: Date;
     constructor(options: CatalogOptions);
+    getName(): string;
+    getOptions(): CatalogOptions;
+    getMetadata(): Metadata;
+    getColumns(): string[];
     rowCount(): Promise<void>;
     columnHeader(): Promise<void>;
     sanitizeColumnNames(columns: string[]): string[];

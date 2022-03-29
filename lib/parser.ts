@@ -59,7 +59,7 @@ class Parser {
       throw new Error('invalid-query: no query found')
     }
 
-    console.log(`raw: ${raw}`)
+    // console.log(`raw: ${raw}`)
     const rawAST = parse(raw)
 
     if (Object.keys(rawAST[0].RawStmt.stmt)[0] === 'SelectStmt') {

@@ -46,6 +46,18 @@ var Catalog = class {
       warnings: {}
     };
   }
+  getName() {
+    return this.name;
+  }
+  getOptions() {
+    return this.options;
+  }
+  getMetadata() {
+    return this.metadata;
+  }
+  getColumns() {
+    return this.metadata.columns;
+  }
   rowCount() {
     return __async(this, null, function* () {
       const rCount = yield execify(`${mlr} --ojson count ${this.options.source}`);
@@ -119,23 +131,28 @@ function createCatalog(query2, opt) {
       if (opt.destination === void 0 || opt.destination === "") {
         reject(new Error("failed-to-create-catalog: no destination provided"));
       }
+      const catalogOptions = Object.assign({}, opt);
       if (opt.name === void 0 || opt.name === "") {
-        reject(new Error("failed-to-create-catalog: no name provided"));
+        catalogOptions.name = path.basename(catalogOptions.source).split(".")[0];
       }
-      if (opt.input === "csv" && !opt.source.endsWith(".csv")) {
-        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      if (opt.input === void 0) {
+        const assumeType = path.extname(opt.source) === ".csv" ? "csv" : "json";
+        console.warn(`no-input-type-provided: assuming ${assumeType}`);
+        catalogOptions.input = assumeType;
       }
-      if (opt.input === "json" && !opt.source.endsWith(".json")) {
-        reject(new Error("failed-to-create-catalog: file extension does not match input type"));
+      if (opt.output === void 0) {
+        const assumeType = path.extname(opt.destination) === ".csv" ? "csv" : "json";
+        console.warn(`no-output-type-provided: assuming ${assumeType}`);
+        catalogOptions.output = assumeType;
       }
-      const catalog = new Catalog(opt);
+      const catalog = new Catalog(catalogOptions);
       Promise.all([
         catalog.columnHeader(),
         catalog.fileSize(),
         catalog.fileType(),
         catalog.rowCount()
       ]).then(() => {
-        console.log(`created catalog for: ${opt.name}`);
+        console.log(`created catalog: ${catalog.getName()}`);
         resolve(catalog);
       }).catch((err) => reject(err));
     });
@@ -178,7 +195,6 @@ var Parser = class {
     if (raw.trim() === "") {
       throw new Error("invalid-query: no query found");
     }
-    console.log(`raw: ${raw}`);
     const rawAST = parse(raw);
     if (Object.keys(rawAST[0].RawStmt.stmt)[0] === "SelectStmt") {
       this.stmt.type = "select";
@@ -274,6 +290,91 @@ function parseStmt(query2) {
 // lib/engine.ts
 import { join as join2 } from "path";
 import { createWriteStream } from "fs";
+
+// lib/plugin/s3.ts
+import { fromIni } from "@aws-sdk/credential-providers";
+import {
+  S3Client,
+  HeadObjectCommand
+} from "@aws-sdk/client-s3";
+var credentials = (profile) => {
+  return fromIni({
+    profile,
+    mfaCodeProvider: (mfaSerial) => __async(void 0, null, function* () {
+      return mfaSerial;
+    })
+  });
+};
+function s3Client(config) {
+  return new S3Client(config);
+}
+function fileExists(bucket, key) {
+  return __async(this, null, function* () {
+    const client = s3Client({
+      credentials: credentials("default"),
+      region: "us-east-2"
+    });
+    const command = new HeadObjectCommand({
+      Bucket: bucket,
+      Key: key
+    });
+    const result = yield client.send(command);
+    console.log(result.$metadata);
+    if (result.$metadata.httpStatusCode !== void 0 && result.$metadata.httpStatusCode !== 200) {
+      return false;
+    }
+    return true;
+  });
+}
+function parseS3URI(uri, options) {
+  if (options === void 0) {
+    options = {
+      file: false
+    };
+  }
+  const opt = {
+    file: options.file ? options.file : false
+  };
+  if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3") {
+    throw new Error(`invalid-s3-uri: ${uri}`);
+  }
+  let err = "";
+  const result = {
+    bucket: "",
+    key: "",
+    file: ""
+  };
+  const src = uri.split(":/")[1];
+  const [bucket, ...keys] = src.split("/").splice(1);
+  result.bucket = bucket;
+  result.key = keys.join("/");
+  keys.forEach((k, i) => {
+    if (i === keys.length - 1) {
+      const last = k.split(".").length;
+      if (opt.file && last === 1) {
+        err = `uri should be a given, given: ${uri}`;
+      }
+      if (!opt.file && last === 1)
+        return;
+      if (!opt.file && last > 1) {
+        console.log(k);
+        err = `Invalid S3 uri, ${uri} should not end with a file name`;
+        return;
+      }
+      if (!opt.file && k.split(".")[1] !== "" && last > 1) {
+        err = `${uri} should not be a file endpoint: ${k}`;
+      }
+      if (last > 1 && k.split(".")[1] !== "")
+        result.file = k;
+    }
+  });
+  return {
+    data: result,
+    err
+  };
+}
+
+// lib/engine.ts
 var mlr2 = join2(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 function query(query2, opt) {
   return __async(this, null, function* () {
@@ -282,7 +383,7 @@ function query(query2, opt) {
       throw new Error("failed-to-create-catalog");
     }
     const plan = new Analyzer(catalog, parseStmt(query2)).analyze();
-    console.log(JSON.stringify(catalog, null, 2));
+    console.log(plan.cmd + " " + plan.args.join(" "));
     const { stdout } = exec2(plan.cmd + " " + plan.args.join(" "), {
       maxBuffer: 1024 * 1024 * 1024
     });
@@ -290,7 +391,7 @@ function query(query2, opt) {
       throw new Error("failed-to-execute-query");
     }
     stdout.on("close", () => {
-      console.log("done");
+      console.log("done executing query");
     });
     stdout.pipe(createWriteStream(catalog.options.destination));
   });
@@ -305,28 +406,38 @@ var Analyzer = class {
     };
   }
   analyze() {
-    console.log("analyzing query");
+    console.log("analyzing query:");
     this.plan.cmd = mlr2;
     if (this.stmt.type !== "select") {
       throw new Error("not-implemented: only select queries are supported at this time");
     }
     if (this.stmt.from.length === 1) {
       const table = this.stmt.from[0].relname;
-      console.log("from table: ", table);
+      console.log("	 table:", table);
       const source = this.catalog.options.source;
-      const destination = this.catalog.options.destination;
-      console.log("destination: ", destination);
       if (this.stmt.columns.length === 1) {
         if (this.stmt.columns[0].name === "*") {
-          this.plan.args = ["--icsv", "--ojson", "cat", source];
+          this.plan.args = ["--icsv", "--ojson", "--implicit-csv-header", "label", `${this.catalog.metadata.columns.join(",")}`, source];
           return this.plan;
         }
-        this.plan.args = ["--icsv", "--ojson", "cut", "-f", this.stmt.columns[0].name, source];
+        const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, "_");
+        if (!this.catalog.metadata.columns.includes(singleField)) {
+          throw new Error(`column-not-found: ${singleField}`);
+        }
+        console.log("	 column:", singleField);
+        this.plan.args = ["--icsv", "--ojson", "--implicit-csv-header", "label", `${this.catalog.metadata.columns.join(",")}`, "then", "cut", "-f", singleField, source];
+        return this.plan;
       }
       if (this.stmt.columns.length > 1) {
-        const fields = this.stmt.columns.map((col) => col.name).join(",");
-        console.log("fields: ", fields);
-        this.plan.args = ["--icsv", "--ojson", "cut", "-o", "-f", fields, source];
+        const fields = this.stmt.columns.map((column) => {
+          const sanitized = column.name.replace(/[^a-zA-Z0-9]/g, "_");
+          if (!this.catalog.metadata.columns.includes(sanitized)) {
+            throw new Error(`column ${column.name} is not in the list of columns`);
+          }
+          return sanitized;
+        }).join(",");
+        console.log("	 columns: ", fields);
+        this.plan.args = ["--icsv", "--ojson", "--implicit-csv-header", "label", `${this.catalog.metadata.columns.join(",")}`, "then", "cut", "-o", "-f", fields, source];
         return this.plan;
       }
     }
@@ -334,7 +445,10 @@ var Analyzer = class {
   }
 };
 export {
+  Analyzer,
   createCatalog,
+  fileExists,
+  parseS3URI,
   parseStmt,
   query
 };

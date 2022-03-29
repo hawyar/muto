@@ -1,7 +1,8 @@
 import { fromIni } from '@aws-sdk/credential-providers'
 import {
   S3Client,
-  S3ClientConfig
+  S3ClientConfig,
+  HeadObjectCommand
 } from '@aws-sdk/client-s3'
 
 export const credentials = (profile: string): any => {
@@ -14,34 +15,32 @@ export const credentials = (profile: string): any => {
 }
 
 export function s3Client (config: S3ClientConfig): S3Client {
-  return s3Client({
+  return new S3Client(config)
+}
+
+export async function fileExists (bucket: string, key: string): Promise<boolean> {
+  const client = s3Client({
     credentials: credentials('default'),
     region: 'us-east-2'
   })
+
+  const command = new HeadObjectCommand({
+    Bucket: bucket,
+    Key: key
+  })
+
+  const result = await client.send(command)
+
+  console.log(result.$metadata)
+
+  if (result.$metadata.httpStatusCode !== undefined && result.$metadata.httpStatusCode !== 200) {
+    return false
+  }
+
+  return true
 }
-// async fileExists (key: string): Promise<boolean> {
-//   const client = s3Client({
-//     credentials: credentials('default'),
-//     region: 'us-east-2'
-//   })
 
-//   const command = new HeadObjectCommand({
-//     Bucket: this.bucket,
-//     Key: key
-//   })
-
-//   const result = await client.send(command)
-
-//   console.log(result)
-
-//   if (result.$metadata.httpStatusCode !== undefined && result.$metadata.httpStatusCode !== 200) {
-//     return false
-//   }
-
-//   return true
-// }
-
-export function parseS3Uri (
+export function parseS3URI (
   uri: string,
   options: {
     file: boolean
@@ -54,6 +53,11 @@ export function parseS3Uri (
     }
     err: string
   } {
+  if (options === undefined) {
+    options = {
+      file: false
+    }
+  }
   const opt = {
     file: options.file ? options.file : false
   }
@@ -83,6 +87,7 @@ export function parseS3Uri (
       if (!opt.file && last === 1) return
 
       if (!opt.file && last > 1) {
+        console.log(k)
         err = `Invalid S3 uri, ${uri} should not end with a file name`
         return
       }
