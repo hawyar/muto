@@ -58,20 +58,62 @@ __export(engine_exports, {
 });
 
 // lib/catalog.ts
-var import_path = __toESM(require("path"), 1);
+var import_path2 = __toESM(require("path"), 1);
 var import_os = __toESM(require("os"), 1);
-var import_fs = __toESM(require("fs"), 1);
-var import_child_process = require("child_process");
+var import_fs2 = __toESM(require("fs"), 1);
+var import_child_process2 = require("child_process");
 var import_util = __toESM(require("util"), 1);
-var execify = import_util.default.promisify(import_child_process.exec);
-var mlr = (0, import_path.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+
+// lib/miller.ts
+var import_path = require("path");
+var import_process = require("process");
+var import_child_process = require("child_process");
+var import_fs = require("fs");
+var Miller = class {
+  constructor() {
+    this.path = "";
+    this.version = "6.0.0";
+    this.cmd = "mlr@v" + this.version;
+    this.args = [];
+  }
+  binPath() {
+    const local = (0, import_path.join)((0, import_process.cwd)(), "/node_modules", ".bin", this.cmd);
+    if ((0, import_fs.existsSync)(local)) {
+      this.path = local;
+      return;
+    }
+    const stdout = (0, import_child_process.execSync)("npm root -g");
+    console.log(stdout.toString());
+    if (stdout === null) {
+      throw new Error('failed-command: "npm root -g"');
+    }
+    const global = stdout.toString().trim();
+    if ((0, import_fs.existsSync)((0, import_path.join)(global, "muto", "node_modules", ".bin", this.cmd))) {
+      this.path = (0, import_path.join)(global, "muto", "node_modules", ".bin", this.cmd);
+      return;
+    }
+    throw new Error("unable-to-find-mlr: make sure you the `npm run pre` is run");
+  }
+};
+function millerCmd() {
+  const mlr4 = new Miller();
+  mlr4.binPath();
+  return mlr4;
+}
+
+// lib/catalog.ts
+var execify = import_util.default.promisify(import_child_process2.exec);
+var mlr2 = millerCmd();
+console.log(mlr2);
+var mlr = (0, import_path2.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 var Catalog = class {
   constructor(options) {
-    this.name = options.name !== "" ? options.name : import_path.default.basename(options.source);
+    this.name = options.name !== "" ? options.name : import_path2.default.basename(options.source);
     this.options = options;
     this.createdAt = new Date();
     this.metadata = {
-      type: "",
+      fileName: import_path2.default.basename(options.source),
+      type: "csv",
       columns: [],
       header: false,
       extension: "",
@@ -128,6 +170,14 @@ var Catalog = class {
   sanitizeColumnNames(columns) {
     return columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
   }
+  fileExtension() {
+    if (this.options.source.endsWith(".csv")) {
+      this.metadata.extension = "csv";
+    }
+    if (this.options.source.endsWith(".json")) {
+      this.metadata.extension = "json";
+    }
+  }
   fileType() {
     return __async(this, null, function* () {
       if (import_os.default.platform() !== "linux" && import_os.default.platform() !== "darwin") {
@@ -141,18 +191,20 @@ var Catalog = class {
       if (type === "") {
         throw new Error("failed-to-detect-mime-type");
       }
-      if (this.options.source.endsWith(".csv")) {
-        this.metadata.extension = "csv";
+      if (type === "text/csv") {
+        this.metadata.type = "csv";
+        return;
       }
-      if (this.options.source.endsWith(".json")) {
-        this.metadata.extension = "json";
+      if (type === "application/json") {
+        this.metadata.type = "json";
+        return;
       }
-      this.metadata.type = type;
+      throw new Error("unsupported-file-type");
     });
   }
   fileSize() {
     return __async(this, null, function* () {
-      const stat = yield import_fs.default.promises.stat(this.options.source);
+      const stat = yield import_fs2.default.promises.stat(this.options.source);
       this.metadata.size = stat.size;
     });
   }
@@ -171,24 +223,25 @@ function createCatalog(query2, opt) {
       }
       const catalogOptions = Object.assign({}, opt);
       if (opt.name === void 0 || opt.name === "") {
-        catalogOptions.name = import_path.default.basename(catalogOptions.source).split(".")[0];
+        catalogOptions.name = import_path2.default.basename(catalogOptions.source).split(".")[0];
       }
       if (opt.input === void 0) {
-        const assumeType = import_path.default.extname(opt.source) === ".csv" ? "csv" : "json";
+        const assumeType = import_path2.default.extname(opt.source) === ".csv" ? "csv" : "json";
         console.warn(`no-input-type-provided: assuming ${assumeType}`);
         catalogOptions.input = assumeType;
       }
       if (opt.output === void 0) {
-        const assumeType = import_path.default.extname(opt.destination) === ".csv" ? "csv" : "json";
+        const assumeType = import_path2.default.extname(opt.destination) === ".csv" ? "csv" : "json";
         console.warn(`no-output-type-provided: assuming ${assumeType}`);
         catalogOptions.output = assumeType;
       }
       const catalog = new Catalog(catalogOptions);
       Promise.all([
-        catalog.columnHeader(),
         catalog.fileSize(),
         catalog.fileType(),
-        catalog.rowCount()
+        catalog.fileExtension(),
+        catalog.rowCount(),
+        catalog.columnHeader()
       ]).then(() => {
         console.log(`created catalog: ${catalog.getName()}`);
         resolve(catalog);
@@ -198,7 +251,7 @@ function createCatalog(query2, opt) {
 }
 
 // lib/engine.ts
-var import_child_process2 = require("child_process");
+var import_child_process3 = require("child_process");
 
 // lib/parser.ts
 var import_pgsql_parser = require("pgsql-parser");
@@ -326,8 +379,8 @@ function parseStmt(query2) {
 }
 
 // lib/engine.ts
-var import_path2 = require("path");
-var import_fs2 = require("fs");
+var import_path3 = require("path");
+var import_fs3 = require("fs");
 
 // lib/plugin/s3.ts
 var import_credential_providers = require("@aws-sdk/credential-providers");
@@ -410,16 +463,16 @@ function parseS3URI(uri, options) {
 }
 
 // lib/engine.ts
-var mlr2 = (0, import_path2.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+var mlr3 = (0, import_path3.join)(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 function query(query2, opt) {
   return __async(this, null, function* () {
     const catalog = yield createCatalog(query2, opt);
-    if (catalog == null) {
+    if (catalog === null || catalog === void 0) {
       throw new Error("failed-to-create-catalog");
     }
     const plan = new Analyzer(catalog, parseStmt(query2)).analyze();
     console.log(plan.cmd + " " + plan.args.join(" "));
-    const { stdout } = (0, import_child_process2.exec)(plan.cmd + " " + plan.args.join(" "), {
+    const { stdout } = (0, import_child_process3.exec)(plan.cmd + " " + plan.args.join(" "), {
       maxBuffer: 1024 * 1024 * 1024
     });
     if (stdout === null) {
@@ -428,7 +481,7 @@ function query(query2, opt) {
     stdout.on("close", () => {
       console.log("done executing query");
     });
-    stdout.pipe((0, import_fs2.createWriteStream)(catalog.options.destination));
+    stdout.pipe((0, import_fs3.createWriteStream)(catalog.options.destination));
   });
 }
 var Analyzer = class {
@@ -442,7 +495,7 @@ var Analyzer = class {
   }
   analyze() {
     console.log("analyzing query:");
-    this.plan.cmd = mlr2;
+    this.plan.cmd = mlr3;
     if (this.stmt.type !== "select") {
       throw new Error("not-implemented: only select queries are supported at this time");
     }

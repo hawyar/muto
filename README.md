@@ -24,14 +24,14 @@ await query("select * from albums", {
 });
 ```
 
-or install it globally and use the CLI
+or install it globally
 
 ```bash
 npm i muto -g
 ```
 
-then use it like
+then use the CLI
 
 ```
-muto query "SELECT * FROM albums" --source ./path/to/albums.csv -destination s3://my_bucket/output.json
+muto query "SELECT * FROM albums" -s ./path/to/albums.csv -d s3://my_bucket/output.json
 ```

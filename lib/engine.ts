@@ -12,7 +12,7 @@ const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 export async function query (query: string, opt: CatalogOptions): Promise<void> {
   const catalog = await createCatalog(query, opt)
 
-  if (catalog == null) {
+  if (catalog === null || catalog === undefined) {
     throw new Error('failed-to-create-catalog')
   }
 

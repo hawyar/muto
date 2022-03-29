@@ -1,7 +1,8 @@
 declare type Delimiter = ',' | '\t';
-declare type DataType = 'csv' | 'json' | 'tsv';
+declare type DataType = 'csv' | 'json';
 interface Metadata {
-    type: string;
+    fileName: string;
+    type: DataType;
     columns: string[];
     header: boolean;
     extension: string;
@@ -42,6 +43,7 @@ export declare class Catalog {
     rowCount(): Promise<void>;
     columnHeader(): Promise<void>;
     sanitizeColumnNames(columns: string[]): string[];
+    fileExtension(): void;
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
 }

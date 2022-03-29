@@ -20,20 +20,62 @@ var __async = (__this, __arguments, generator) => {
 };
 
 // lib/catalog.ts
-import path, { join } from "path";
+import path, { join as join2 } from "path";
 import os from "os";
 import fs from "fs";
 import { exec } from "child_process";
 import util from "util";
+
+// lib/miller.ts
+import { join } from "path";
+import { cwd } from "process";
+import { execSync } from "child_process";
+import { existsSync } from "fs";
+var Miller = class {
+  constructor() {
+    this.path = "";
+    this.version = "6.0.0";
+    this.cmd = "mlr@v" + this.version;
+    this.args = [];
+  }
+  binPath() {
+    const local = join(cwd(), "/node_modules", ".bin", this.cmd);
+    if (existsSync(local)) {
+      this.path = local;
+      return;
+    }
+    const stdout = execSync("npm root -g");
+    console.log(stdout.toString());
+    if (stdout === null) {
+      throw new Error('failed-command: "npm root -g"');
+    }
+    const global = stdout.toString().trim();
+    if (existsSync(join(global, "muto", "node_modules", ".bin", this.cmd))) {
+      this.path = join(global, "muto", "node_modules", ".bin", this.cmd);
+      return;
+    }
+    throw new Error("unable-to-find-mlr: make sure you the `npm run pre` is run");
+  }
+};
+function millerCmd() {
+  const mlr4 = new Miller();
+  mlr4.binPath();
+  return mlr4;
+}
+
+// lib/catalog.ts
 var execify = util.promisify(exec);
-var mlr = join(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+var mlr2 = millerCmd();
+console.log(mlr2);
+var mlr = join2(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 var Catalog = class {
   constructor(options) {
     this.name = options.name !== "" ? options.name : path.basename(options.source);
     this.options = options;
     this.createdAt = new Date();
     this.metadata = {
-      type: "",
+      fileName: path.basename(options.source),
+      type: "csv",
       columns: [],
       header: false,
       extension: "",
@@ -90,6 +132,14 @@ var Catalog = class {
   sanitizeColumnNames(columns) {
     return columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
   }
+  fileExtension() {
+    if (this.options.source.endsWith(".csv")) {
+      this.metadata.extension = "csv";
+    }
+    if (this.options.source.endsWith(".json")) {
+      this.metadata.extension = "json";
+    }
+  }
   fileType() {
     return __async(this, null, function* () {
       if (os.platform() !== "linux" && os.platform() !== "darwin") {
@@ -103,13 +153,15 @@ var Catalog = class {
       if (type === "") {
         throw new Error("failed-to-detect-mime-type");
       }
-      if (this.options.source.endsWith(".csv")) {
-        this.metadata.extension = "csv";
+      if (type === "text/csv") {
+        this.metadata.type = "csv";
+        return;
       }
-      if (this.options.source.endsWith(".json")) {
-        this.metadata.extension = "json";
+      if (type === "application/json") {
+        this.metadata.type = "json";
+        return;
       }
-      this.metadata.type = type;
+      throw new Error("unsupported-file-type");
     });
   }
   fileSize() {
@@ -147,10 +199,11 @@ function createCatalog(query2, opt) {
       }
       const catalog = new Catalog(catalogOptions);
       Promise.all([
-        catalog.columnHeader(),
         catalog.fileSize(),
         catalog.fileType(),
-        catalog.rowCount()
+        catalog.fileExtension(),
+        catalog.rowCount(),
+        catalog.columnHeader()
       ]).then(() => {
         console.log(`created catalog: ${catalog.getName()}`);
         resolve(catalog);
@@ -288,7 +341,7 @@ function parseStmt(query2) {
 }
 
 // lib/engine.ts
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { createWriteStream } from "fs";
 
 // lib/plugin/s3.ts
@@ -375,11 +428,11 @@ function parseS3URI(uri, options) {
 }
 
 // lib/engine.ts
-var mlr2 = join2(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
+var mlr3 = join3(process.cwd(), "node_modules", ".bin", "mlr@v6.0.0");
 function query(query2, opt) {
   return __async(this, null, function* () {
     const catalog = yield createCatalog(query2, opt);
-    if (catalog == null) {
+    if (catalog === null || catalog === void 0) {
       throw new Error("failed-to-create-catalog");
     }
     const plan = new Analyzer(catalog, parseStmt(query2)).analyze();
@@ -407,7 +460,7 @@ var Analyzer = class {
   }
   analyze() {
     console.log("analyzing query:");
-    this.plan.cmd = mlr2;
+    this.plan.cmd = mlr3;
     if (this.stmt.type !== "select") {
       throw new Error("not-implemented: only select queries are supported at this time");
     }

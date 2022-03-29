@@ -7,3 +7,4 @@ tests/example
 .muto-cache
 coverage
 .nyc_output
+.nova

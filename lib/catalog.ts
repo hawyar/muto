@@ -3,16 +3,22 @@ import os from 'os'
 import fs from 'fs'
 import { exec } from 'child_process'
 import util from 'util'
+import { millerCmd } from './miller'
 
 const execify = util.promisify(exec)
+
+const mlr2 = millerCmd()
+
+console.log(mlr2)
 
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 type Delimiter = ',' | '\t'
-type DataType = 'csv' | 'json' | 'tsv'
+type DataType = 'csv' | 'json'
 
 interface Metadata {
-  type: string
+  fileName: string
+  type: DataType
   columns: string[]
   header: boolean
   extension: string
@@ -49,7 +55,8 @@ export class Catalog {
     this.options = options
     this.createdAt = new Date()
     this.metadata = {
-      type: '',
+      fileName: path.basename(options.source),
+      type: 'csv',
       columns: [],
       header: false,
       extension: '',
@@ -116,6 +123,16 @@ export class Catalog {
     return columns.map(column => column.replace(/[^a-zA-Z0-9]/g, '_'))
   }
 
+  fileExtension (): void {
+    if (this.options.source.endsWith('.csv')) {
+      this.metadata.extension = 'csv'
+    }
+
+    if (this.options.source.endsWith('.json')) {
+      this.metadata.extension = 'json'
+    }
+  }
+
   async fileType (): Promise<void> {
     if (os.platform() !== 'linux' && os.platform() !== 'darwin') {
       throw new Error('unsupported-platform')
@@ -133,15 +150,17 @@ export class Catalog {
       throw new Error('failed-to-detect-mime-type')
     }
 
-    if (this.options.source.endsWith('.csv')) {
-      this.metadata.extension = 'csv'
+    if (type === 'text/csv') {
+      this.metadata.type = 'csv'
+      return
     }
 
-    if (this.options.source.endsWith('.json')) {
-      this.metadata.extension = 'json'
+    if (type === 'application/json') {
+      this.metadata.type = 'json'
+      return
     }
 
-    this.metadata.type = type
+    throw new Error('unsupported-file-type')
   }
 
   async fileSize (): Promise<void> {
@@ -183,10 +202,11 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
     const catalog = new Catalog(catalogOptions)
 
     Promise.all([
-      catalog.columnHeader(),
       catalog.fileSize(),
       catalog.fileType(),
-      catalog.rowCount()
+      catalog.fileExtension(),
+      catalog.rowCount(),
+      catalog.columnHeader()
     ])
       .then(() => {
         console.log(`created catalog: ${catalog.getName()}`)
