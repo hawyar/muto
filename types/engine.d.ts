@@ -15,3 +15,19 @@ export declare class Analyzer {
     constructor(catalog: Catalog, stmt: Stmt);
     analyze(): ExecutePlan;
 }
+declare class Miller {
+    path: string;
+    version: string;
+    cmd: string;
+    args: string[];
+    constructor();
+    getPath(): string;
+    getCmd(): string;
+    csvInput(): void;
+    jsonInput(): void;
+    csvOutput(): void;
+    jsonOutput(): void;
+    implicitCsvHeader(fields: []): void;
+    findBinPath(): void;
+}
+export declare function millerCmd(): Miller;

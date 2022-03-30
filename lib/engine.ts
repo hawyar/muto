@@ -1,13 +1,14 @@
 import { createCatalog, CatalogOptions, Catalog } from './catalog'
-import { exec } from 'child_process'
+import { exec, execSync } from 'child_process'
 import { parseStmt, Stmt } from './parser'
+import { createWriteStream, existsSync } from 'fs'
+import isInstalledGlobally from 'is-installed-globally'
+
 import { join } from 'path'
-import { createWriteStream } from 'fs'
+import { cwd } from 'process'
 export { parseStmt } from './parser'
 export { createCatalog } from './catalog'
 export { parseS3URI, fileExists } from './plugin/s3'
-
-const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
 export async function query (query: string, opt: CatalogOptions): Promise<void> {
   const catalog = await createCatalog(query, opt)
@@ -55,7 +56,9 @@ export class Analyzer {
   analyze (): ExecutePlan {
     console.log('analyzing query:')
 
-    this.plan.cmd = mlr
+    const mlr = millerCmd()
+
+    this.plan.cmd = mlr.getPath()
 
     if (this.stmt.type !== 'select') {
       throw new Error('not-implemented: only select queries are supported at this time')
@@ -102,4 +105,78 @@ export class Analyzer {
     }
     return this.plan
   }
+}
+
+class Miller {
+  path: string
+  version: string
+  cmd: string
+  args: string[]
+  constructor () {
+    this.path = ''
+    this.version = '6.0.0'
+    this.cmd = 'mlr@' + 'v' + this.version
+    this.args = []
+  }
+
+  getPath (): string {
+    if (this.path === '') {
+      throw new Error('miller-path-not-set: missing miller binary path')
+    }
+    return this.path
+  }
+
+  getCmd (): string {
+    return this.cmd
+  }
+
+  csvInput (): void {
+    this.args.push('--icsv')
+  }
+
+  jsonInput (): void {
+    this.args.push('--ijson')
+  }
+
+  csvOutput (): void {
+    this.args.push('--ocsv')
+  }
+
+  jsonOutput (): void {
+    this.args.push('--ojson')
+  }
+
+  implicitCsvHeader (fields: []): void {
+    this.args.push(`--implicit-csv-header label ${fields.join(',')}`)
+  }
+
+  findBinPath (): void {
+    if (!isInstalledGlobally) {
+      const local = join(cwd(), '/node_modules', '.bin', this.cmd)
+      if (existsSync(local)) {
+        this.path = local
+        return
+      }
+    }
+
+    const stdout = execSync('npm root -g')
+
+    if (stdout === null) {
+      throw new Error('failed-command: "npm root -g"')
+    }
+
+    const global = join(stdout.toString().trim(), 'muto', 'node_modules', '.bin', this.cmd)
+
+    if (existsSync(global)) {
+      this.path = global
+      return
+    }
+    throw new Error('unable-to-find-mlr: make sure the `npm run prepare` command has been run')
+  }
+}
+
+export function millerCmd (): Miller {
+  const mlr = new Miller()
+  mlr.findBinPath()
+  return mlr
 }

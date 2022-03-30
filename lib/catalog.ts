@@ -3,13 +3,8 @@ import os from 'os'
 import fs from 'fs'
 import { exec } from 'child_process'
 import util from 'util'
-import { millerCmd } from './miller'
 
 const execify = util.promisify(exec)
-
-const mlr2 = millerCmd()
-
-console.log(mlr2)
 
 const mlr = join(process.cwd(), 'node_modules', '.bin', 'mlr@v6.0.0')
 
@@ -182,24 +177,39 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
       reject(new Error('failed-to-create-catalog: no destination provided'))
     }
 
-    const catalogOptions = Object.assign({}, opt)
+    const catalogOpt = Object.assign({}, opt)
 
     if (opt.name === undefined || opt.name === '') {
-      catalogOptions.name = path.basename(catalogOptions.source).split('.')[0]
+      catalogOpt.name = path.basename(opt.source).split('.')[0]
     }
 
     if (opt.input === undefined) {
-      const assumeType = path.extname(opt.source) === '.csv' ? 'csv' : 'json'
-      console.warn(`no-input-type-provided: assuming ${assumeType}`)
-      catalogOptions.input = assumeType
+      switch (path.extname(opt.source)) {
+        case '.csv':
+          catalogOpt.input = 'csv'
+          break
+        case '.json':
+          catalogOpt.input = 'json'
+          break
+        default:
+          reject(new Error('failed-to-create-catalog: unsupported input file type'))
+      }
     }
 
     if (opt.output === undefined) {
-      const assumeType = path.extname(opt.destination) === '.csv' ? 'csv' : 'json'
-      console.warn(`no-output-type-provided: assuming ${assumeType}`)
-      catalogOptions.output = assumeType
+      switch (path.extname(opt.destination)) {
+        case '.csv':
+          catalogOpt.output = 'csv'
+          break
+        case '.json':
+          catalogOpt.output = 'json'
+          break
+        default:
+          reject(new Error('failed-to-create-catalog: unsupported output file type'))
+      }
     }
-    const catalog = new Catalog(catalogOptions)
+
+    const catalog = new Catalog(catalogOpt)
 
     Promise.all([
       catalog.fileSize(),
@@ -209,7 +219,7 @@ export async function createCatalog (query: String, opt: CatalogOptions): Promis
       catalog.columnHeader()
     ])
       .then(() => {
-        console.log(`created catalog: ${catalog.getName()}`)
+        console.log(`processing file: ${catalog.getMetadata().fileName}`)
         resolve(catalog)
       })
       .catch((err) => reject(err))

@@ -12,7 +12,6 @@ tap.test('select *', async (t) => {
     destination: path.join(dirname, 'fixture', 'sales.json')
   })
 
-  console.log(JSON.stringify(catalog, null, 2))
   t.ok(catalog)
   t.end()
 })
