@@ -1,6 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error
-import { parse } from 'pgsql-parser'
+import { parse as sqlParser } from 'pgsql-parser'
 
 export interface Stmt {
   type: string
@@ -15,7 +15,11 @@ export interface Stmt {
     inh: string
   }]
   sort: {}
-  where: {}
+  where: {
+    operator: string
+    left: string
+    right: string
+  }
   group: string[]
   having: string[]
   orderBy: string[]
@@ -28,8 +32,8 @@ export interface Stmt {
 class Parser {
   query: string
   stmt: Stmt
-  constructor () {
-    this.query = ''
+  constructor (raw: string) {
+    this.query = raw
     this.stmt = {
       type: '',
       distinct: false,
@@ -43,7 +47,11 @@ class Parser {
         inh: ''
       }],
       sort: {},
-      where: {},
+      where: {
+        operator: '',
+        left: '',
+        right: ''
+      },
       group: [],
       having: [],
       orderBy: [],
@@ -54,13 +62,42 @@ class Parser {
     }
   }
 
-  parse (raw: string): Stmt {
+  getStmt (): Stmt {
+    return this.stmt
+  }
+
+  getColumns (): string[] {
+    return this.stmt.columns.map(c => c.name)
+  }
+
+  isDistinct (): boolean {
+    return this.stmt.distinct
+  }
+
+  getWhere (): { operator: string, left: string, right: string } {
+    return this.stmt.where
+  }
+
+  limit (): number {
+    return parseInt(this.stmt.limit.val)
+  }
+
+  getTable (): string {
+    return this.stmt.from[0].relname
+  }
+
+  getType (): string {
+    return this.stmt.type
+  }
+
+  parse (): Stmt {
+    const raw = this.query
+
     if (raw.trim() === '') {
       throw new Error('invalid-query: no query found')
     }
 
-    // console.log(`raw: ${raw}`)
-    const rawAST = parse(raw)
+    const rawAST = sqlParser(raw)
 
     if (Object.keys(rawAST[0].RawStmt.stmt)[0] === 'SelectStmt') {
       this.stmt.type = 'select'
@@ -142,8 +179,8 @@ class Parser {
 
         const where = {
           operator: '',
-          left: {},
-          right: {}
+          left: '',
+          right: ''
         }
 
         where.operator = expr.name[0].String.str
@@ -181,6 +218,8 @@ class Parser {
   }
 }
 
-export function parseStmt (query: string): Stmt {
-  return new Parser().parse(query)
+export function parser (query: string): Parser {
+  const p = new Parser(query)
+  p.parse()
+  return p
 }

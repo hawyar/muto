@@ -15,7 +15,11 @@ export interface Stmt {
         }
     ];
     sort: {};
-    where: {};
+    where: {
+        operator: string;
+        left: string;
+        right: string;
+    };
     group: string[];
     having: string[];
     orderBy: string[];
@@ -24,4 +28,22 @@ export interface Stmt {
         val: string;
     };
 }
-export declare function parseStmt(query: string): Stmt;
+declare class Parser {
+    query: string;
+    stmt: Stmt;
+    constructor(raw: string);
+    getStmt(): Stmt;
+    getColumns(): string[];
+    isDistinct(): boolean;
+    getWhere(): {
+        operator: string;
+        left: string;
+        right: string;
+    };
+    limit(): number;
+    getTable(): string;
+    getType(): string;
+    parse(): Stmt;
+}
+export declare function parser(query: string): Parser;
+export {};

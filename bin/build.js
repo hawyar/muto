@@ -4,6 +4,7 @@ import { nodeExternalsPlugin } from 'esbuild-node-externals'
 import fs from 'fs'
 import os from 'os'
 import download from 'download'
+import pc from "picocolors"
 
 async function build () {
   const semver = '6.0.0'
@@ -36,14 +37,19 @@ async function build () {
         process.exit(1)
       })
       .finally(() => {
-        console.log('got mlr@v' + semver)
+        console.log(`Downloaded mlr@v${semver} into ${bin}`)
         fs.renameSync(path.join(process.cwd(), mlr, 'mlr'), bin)
-        fs.rmdirSync(path.join(process.cwd(), mlr), {
+        fs.rm(path.join(process.cwd(), mlr), {
           recursive: true
+        }, (err) => {
+          if (err) {
+            console.error(err)
+            process.exit(1)
+          }
         })
       })
-  } else {
-    console.log(`skipped, ${mlr} already installed`)
+    } else {
+    console.log('Miller already installed')
   }
 
   const esm = await esbuild.build({
@@ -76,7 +82,7 @@ async function build () {
   })
 }
 
-build().then(console.log('bundled muto successfully')).catch((e) => {
+build().catch((e) => {
   console.error(e)
   process.exit(1)
 })

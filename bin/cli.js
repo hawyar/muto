@@ -56,7 +56,7 @@ async function run () {
   }
 
   if (args._.length === 0) {
-    print(`${pc.red("Error: ")} Missing command argument, did you mean 'muto query'? see ${pc.bold('muto --help')}`)
+    print(`${pc.red("Error: ")} Missing command argument, did you mean "muto query" ?`)
     process.exit(0)
   }
 

@@ -5,13 +5,27 @@ import { fileURLToPath } from 'url'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-tap.test('select *', async (t) => {
-  const query = 'select * from sales'
-  const catalog = await createCatalog(query, {
+tap.test('create catalog', async (t) => {
+  const catalog = await createCatalog({
     source: path.join(dirname, 'fixture', 'sales.csv'),
     destination: path.join(dirname, 'fixture', 'sales.json')
   })
-
-  t.ok(catalog)
+  t.same([
+    'Region',
+    'Country',
+    'Item Type',
+    'Sales Channel',
+    'Order Priority',
+    'Order Date',
+    'Order ID',
+    'Ship Date',
+    'Units Sold',
+    'Unit Price',
+    'Unit Cost',
+    'Total Revenue',
+    'Total Cost',
+    'Total Profit'
+  ], catalog.getColumns())
+  t.same(catalog.getDestination(), path.join(dirname, 'fixture', 'sales.json'))
   t.end()
 })
