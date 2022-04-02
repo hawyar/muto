@@ -29,8 +29,7 @@ async function query (raw: string, opt: CatalogOptions): Promise<void> {
     throw new Error('stdout is null')
   }
 
-  const ws = createWriteStream(catalog.getDestination())
-  proc.stdout.pipe(ws)
+  proc.stdout.pipe(createWriteStream(opt.destination))
 }
 
 export {

@@ -1,4 +1,4 @@
-import path from 'path'
+import path, { ParsedPath } from 'path'
 import { createInterface } from 'readline'
 import os from 'os'
 import { constants, createReadStream } from 'fs'
@@ -13,15 +13,11 @@ type Delimiter = ','
 type DataType = 'csv' | 'json'
 
 interface Metadata {
-  root: string
-  dir: string
-  base: string
-  ext: string
-  fileName: string
+  path: ParsedPath
   type: DataType
   columns: string[]
   header: boolean
-  filesize: number
+  fileSize: number
   rowCount: number
   spanMultipleLines: boolean
   quotes: boolean
@@ -43,55 +39,75 @@ export interface CatalogOptions {
 }
 
 export class Catalog {
+  source: Metadata
+  destination: Metadata
   options: CatalogOptions
-  metadata: Metadata
   createdAt: Date
 
   constructor (options: CatalogOptions) {
     this.options = options
     this.createdAt = new Date()
-    this.metadata = {
-      root: process.cwd(),
-      dir: '',
-      base: '',
-      ext: '',
-      fileName: '',
+    this.source = {
+      path: {
+        root: '',
+        dir: '',
+        base: '',
+        ext: '',
+        name: ''
+      },
       type: 'csv',
       columns: [],
       header: false,
-      filesize: 0,
+      fileSize: 0,
       rowCount: 0,
       spanMultipleLines: false,
       quotes: false,
       delimiter: ',',
       errors: {},
-      warnings: {}
+      warnings: {},
+      preview: []
+    }
+    this.destination = {
+      path: {
+        root: '',
+        dir: '',
+        base: '',
+        ext: '',
+        name: ''
+      },
+      type: 'csv',
+      columns: [],
+      header: false,
+      fileSize: 0,
+      rowCount: 0,
+      spanMultipleLines: false,
+      quotes: false,
+      delimiter: ',',
+      errors: {},
+      warnings: {},
+      preview: []
     }
   }
 
-  getSource (): string {
-    return this.options.source
+  getSource (): Metadata {
+    return this.source
   }
 
-  getDestination (): string {
-    return this.options.destination
+  getDestination (): Metadata {
+    return this.destination
   }
 
   getOptions (): CatalogOptions {
     return this.options
   }
 
-  getMetadata (): Metadata {
-    return this.metadata
-  }
-
   getColumns (): string[] {
-    return this.metadata.columns
+    return this.source.columns
   }
 
   async rowCount (): Promise<void> {
     const mlr = millerCmd()
-    const args = mlr.getCmd() + ' ' + mlr.jsonOutput().count().fileSource(this.getSource()).getArgs().join(' ')
+    const args = mlr.getCmd() + ' ' + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(' ')
 
     const count = await execify(args)
 
@@ -108,7 +124,7 @@ export class Catalog {
     if (rowCount[0].count === undefined) {
       throw new Error('failed-to-get-row-count: no count found')
     }
-    this.metadata.rowCount = rowCount[0].count
+    this.source.rowCount = rowCount[0].count
   }
 
   async columnHeader (): Promise<void> {
@@ -127,9 +143,9 @@ export class Catalog {
     }
 
     for (const c in columns[0]) {
-      this.metadata.columns.push(columns[0][c])
+      this.source.columns.push(columns[0][c])
     }
-    this.metadata.header = true
+    this.source.header = true
   }
 
   async validateSource (): Promise<void> {
@@ -147,12 +163,11 @@ export class Catalog {
       throw Error('Source file is empty')
     }
 
-    const fpath = path.parse(this.options.source)
+    this.source.path = path.parse(this.options.source)
+  }
 
-    this.metadata.dir = fpath.dir
-    this.metadata.base = fpath.base
-    this.metadata.ext = fpath.ext
-    this.metadata.fileName = fpath.name
+  async validateDestination (): Promise<void> {
+    this.destination.path = path.parse(this.options.destination)
   }
 
   async fileType (): Promise<void> {
@@ -160,82 +175,98 @@ export class Catalog {
       throw new Error('unsupported-platform')
     }
 
-    const mime = await execify(`file ${this.options.source} --mime-type`)
+    const { stdout, stderr } = await execify(`file ${this.options.source} --mime-type`)
 
-    if (mime.stderr !== '') {
-      throw new Error(`failed-to-detect-mime-type: ${mime.stderr}`)
+    if (stderr !== '') {
+      throw new Error(`failed-to-detect-mime-type: ${stderr}`)
     }
 
-    const type = mime.stdout.split(':')[1].trim()
+    const mimeType = stdout.split(':')[1].trim()
 
-    if (type === '') {
+    console.log(mimeType)
+
+    if (mimeType === 'application/json') {
       throw new Error('failed-to-detect-mime-type')
     }
 
-    if (type === 'text/csv') {
-      this.metadata.type = 'csv'
+    if (mimeType === 'application/csv') {
+      this.source.type = 'csv'
       return
     }
 
-    if (type === 'application/json') {
-      this.metadata.type = 'json'
+    if (mimeType === 'application/json') {
+      this.source.type = 'json'
       return
     }
 
-    // TODO: find a bette way? this is risky we could still be wrong
+    if (mimeType === 'text/csv') {
+      this.source.type = 'csv'
+      return
+    }
+
+    if (mimeType === 'text/plain') {
+      this.source.type = 'csv'
+      return
+    }
+
+    // TODO: find a better way! we could still be wrong
     const rl = createInterface({
       input: createReadStream(this.options.source)
     })
 
-    let firstLine = ''
+    let first = ''
 
     rl.on('line', line => {
-      firstLine = line
+      first = line
       rl.close()
     })
 
     rl.on('close', () => {
-      if (firstLine.startsWith('{') || firstLine.startsWith('[')) {
-        this.metadata.type = 'json'
+      if (first.startsWith('{') || first.startsWith('[')) {
         return true
       }
 
-      if (firstLine.startsWith('"') || firstLine.startsWith('\'')) {
-        this.metadata.type = 'csv'
-        return true
+      if (this.options.delimiter === undefined) {
+        const firstLineSplit = first.split(this.options.delimiter)
+
+        if (firstLineSplit.length === this.source.columns.length) {
+          this.source.type = 'csv'
+          return true
+        }
       }
+
+      throw new Error('failed-to-detect-mime-type')
     })
-
-    throw Error(`Error: Unsupported file type ${type}`)
+    throw Error(`Unsupported file type ${mimeType}`)
   }
 
   async fileSize (): Promise<void> {
     const fstat = await stat(this.options.source)
-    this.metadata.filesize = fstat.size
+    this.source.fileSize = fstat.size
   }
 
   sanitizeColumnNames (columns: string[]): string[] {
     return columns.map(column => column.replace(/[^a-zA-Z0-9]/g, '_'))
   }
 
-  // async preview (): Promise<void> {
-  //   const mlr = millerCmd()
-  //   const args = mlr.getCmd() + mlr.jsonOutput().head(5).getArgs().join(' ')
+  async preview (): Promise<void> {
+    const mlr = millerCmd()
+    const args = mlr.getCmd() + mlr.jsonOutput().head(5).fileSource(this.options.source).getArgs().join(' ')
 
-  //   const preview = await execify(args)
+    const preview = await execify(args)
 
-  //   if (preview.stderr !== '') {
-  //     throw new Error(preview.stderr)
-  //   }
+    if (preview.stderr !== '') {
+      throw new Error(preview.stderr)
+    }
 
-  //   const rows = JSON.parse(preview.stdout)
+    const rows = JSON.parse(preview.stdout)
 
-  //   if (rows.length === 0) {
-  //     throw new Error('failed-to-get-preview: no rows found')
-  //   }
+    if (rows.length === 0) {
+      throw new Error('failed-to-get-preview: no rows found')
+    }
 
-  //   this.metadata.preview = rows
-  // }
+    this.source.preview = rows
+  }
 }
 
 export async function createCatalog (opt: CatalogOptions): Promise<Catalog> {
@@ -283,13 +314,14 @@ export async function createCatalog (opt: CatalogOptions): Promise<Catalog> {
 
     Promise.all([
       catalog.validateSource(),
+      catalog.validateDestination(),
       catalog.columnHeader(),
       catalog.fileSize(),
       catalog.fileType(),
       catalog.rowCount()
     ])
       .then(() => {
-        console.log(`created catalog ${catalog.getMetadata().fileName}`)
+        console.log(`created catalog ${catalog.getSource().path.name}`)
         resolve(catalog)
       })
       .catch((err) => reject(err))

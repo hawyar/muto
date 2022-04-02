@@ -1,15 +1,13 @@
+/// <reference types="node" />
+import { ParsedPath } from 'path';
 declare type Delimiter = ',';
 declare type DataType = 'csv' | 'json';
 interface Metadata {
-    root: string;
-    dir: string;
-    base: string;
-    ext: string;
-    fileName: string;
+    path: ParsedPath;
     type: DataType;
     columns: string[];
     header: boolean;
-    filesize: number;
+    fileSize: number;
     rowCount: number;
     spanMultipleLines: boolean;
     quotes: boolean;
@@ -33,21 +31,23 @@ export interface CatalogOptions {
     delimiter: Delimiter;
 }
 export declare class Catalog {
+    source: Metadata;
+    destination: Metadata;
     options: CatalogOptions;
-    metadata: Metadata;
     createdAt: Date;
     constructor(options: CatalogOptions);
-    getSource(): string;
-    getDestination(): string;
+    getSource(): Metadata;
+    getDestination(): Metadata;
     getOptions(): CatalogOptions;
-    getMetadata(): Metadata;
     getColumns(): string[];
     rowCount(): Promise<void>;
     columnHeader(): Promise<void>;
     validateSource(): Promise<void>;
+    validateDestination(): Promise<void>;
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
     sanitizeColumnNames(columns: string[]): string[];
+    preview(): Promise<void>;
 }
 export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;
 export {};

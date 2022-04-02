@@ -26,6 +26,6 @@ tap.test('create catalog', async (t) => {
     'Total Cost',
     'Total Profit'
   ], catalog.getColumns())
-  t.same(catalog.getDestination(), path.join(dirname, 'fixture', 'sales.json'))
+  t.same(catalog.getDestination().path.base, "sales.json")
   t.end()
 })

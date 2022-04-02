@@ -48,7 +48,7 @@ class Analyzer {
 
       const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, '_')
 
-      if (!this.catalog.metadata.columns.includes(singleField)) {
+      if (!this.catalog.source.columns.includes(singleField)) {
         throw new Error(`column-not-found: ${singleField}`)
       }
 
@@ -59,13 +59,13 @@ class Analyzer {
     if (this.stmt.columns.length > 1) {
       const fields = this.stmt.columns.map(column => {
         const sanitized = column.name.replace(/[^a-zA-Z0-9]/g, '_')
-        if (!this.catalog.metadata.columns.includes(sanitized)) {
+        if (!this.catalog.source.columns.includes(sanitized)) {
           throw new Error(`column ${column.name} is not in the list of columns`)
         }
         return sanitized
       }).join(',')
 
-      this.plan.args = ['--icsv', '--ojson', '--implicit-csv-header', 'label', `${this.catalog.metadata.columns.join(',')}`, 'then', 'cut', '-o', '-f', fields, source]
+      this.plan.args = ['--icsv', '--ojson', '--implicit-csv-header', 'label', `${this.catalog.source.columns.join(',')}`, 'then', 'cut', '-o', '-f', fields, source]
       return this.plan
     }
 
