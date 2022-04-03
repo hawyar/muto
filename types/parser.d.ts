@@ -20,7 +20,7 @@ export interface Stmt {
         left: string;
         right: string;
     };
-    group: string[];
+    groupBy: string[];
     having: string[];
     orderBy: string[];
     limit: {
@@ -43,6 +43,7 @@ declare class Parser {
     limit(): number;
     getTable(): string;
     getType(): string;
+    getGroupBy(): string[];
     parse(): Stmt;
 }
 export declare function parser(query: string): Parser;

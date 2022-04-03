@@ -44,7 +44,7 @@ async function run () {
     '-o': '--output',
     '-n': '--name'
   })
-  
+
   if (args['--help']) {
     print(usage)
     process.exit(0)
@@ -56,27 +56,27 @@ async function run () {
   }
 
   if (args._.length === 0) {
-    print(`${pc.red("Error: ")} Missing command argument, did you mean "muto query" ?`)
+    print(`${pc.red('Error: ')} Missing command argument, did you mean "muto query" ?`)
     process.exit(0)
   }
 
   if (args._.length !== 2) {
-    print(`${pc.red("Error: ")} Missing command argument, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')} Missing command argument, see ${pc.bold('muto --help')}`)
     process.exit(0)
   }
 
   if (args._[0] !== 'query') {
-    print(`${pc.red("Error: ")}  Unknown command, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')}  Unknown command, see ${pc.bold('muto --help')}`)
     process.exit(0)
   }
 
   if (!args['--source']) {
-    print(`${pc.red("Error: ")} Missing source, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')} Missing source, see ${pc.bold('muto --help')}`)
     process.exit(0)
   }
 
   if (!args['--destination']) {
-    print(`${pc.red("Error: ")} Missing destination, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')} Missing destination, see ${pc.bold('muto --help')}`)
     process.exit(0)
   }
 
@@ -89,7 +89,7 @@ async function run () {
   }
 
   if (args._[1] === '') {
-    print(`${pc.red("Error: ")} Missing query, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')} Missing query, see ${pc.bold('muto --help')}`)
     process.exit(1)
   }
 
@@ -106,7 +106,7 @@ function print (msg) {
 run().catch(err => {
   if (err.code === 'ARG_UNKNOWN_OPTION') {
     const errMsg = err.message.split('\n')
-    print(`${pc.red("Error: ")} ${errMsg}, see ${pc.bold('muto --help')}`)
+    print(`${pc.red('Error: ')} ${errMsg}, see ${pc.bold('muto --help')}`)
     process.exit(1)
   }
   print(err)

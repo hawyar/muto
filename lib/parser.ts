@@ -20,7 +20,7 @@ export interface Stmt {
     left: string
     right: string
   }
-  group: string[]
+  groupBy: string[]
   having: string[]
   orderBy: string[]
   limit: {
@@ -52,7 +52,7 @@ class Parser {
         left: '',
         right: ''
       },
-      group: [],
+      groupBy: [],
       having: [],
       orderBy: [],
       limit: {
@@ -88,6 +88,10 @@ class Parser {
 
   getType (): string {
     return this.stmt.type
+  }
+
+  getGroupBy (): string[] {
+    return this.stmt.groupBy
   }
 
   parse (): Stmt {
@@ -173,6 +177,13 @@ class Parser {
     //     console.log(ast["sortClause"][0].SortBy)
     // }
 
+    if (ast.groupClause !== undefined) {
+      const group = ast.groupClause.map((g: any) => {
+        return g.ColumnRef.fields[0].String.str
+      })
+
+      this.stmt.groupBy = group
+    }
     if (ast.whereClause !== undefined) {
       if (ast.whereClause !== null && ast?.whereClause?.A_Expr.kind === 'AEXPR_OP') {
         const expr = ast.whereClause.A_Expr

@@ -1,10 +1,12 @@
 ## muto
 
-> Run ad-hoc SQL queries on CSV data
+> Run ad-hoc SQL queries on CSV JSON
 
 ![Tests](https://github.com/hawyar/muto/actions/workflows/test.yml/badge.svg)
 
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+
+**Note**: not uploaded to the the npm registry yet
 
 ## Usage
 
@@ -16,10 +18,7 @@ npm i muto
 import { query } from "muto";
 
 await query("select * from albums", {
-  name: "albums",
-  input: "csv",
   source: "/path/to/file.csv",
-  output: "json",
   destination: "./result.json",
 });
 ```
@@ -33,5 +32,5 @@ npm i muto -g
 then use the CLI
 
 ```
-muto query "SELECT * FROM albums" -s ./path/to/albums.csv -d s3://my_bucket/output.json
+muto query "SELECT * FROM sales" -s ./path/to/sales.csv -d path/to/result.json
 ```

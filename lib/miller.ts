@@ -73,6 +73,11 @@ class Miller {
     return this
   }
 
+  cut (fields: string[]): Miller {
+    this.args.push(`cut -o -f ${fields.join(',')}`)
+    return this
+  }
+
   head (count: number): Miller {
     this.args.push(`head -n ${count}`)
     return this

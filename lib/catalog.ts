@@ -36,6 +36,7 @@ export interface CatalogOptions {
   quotes: boolean
   output: DataType
   delimiter: Delimiter
+  onEnd?: () => void
 }
 
 export class Catalog {
@@ -182,8 +183,6 @@ export class Catalog {
     }
 
     const mimeType = stdout.split(':')[1].trim()
-
-    console.log(mimeType)
 
     if (mimeType === 'application/json') {
       throw new Error('failed-to-detect-mime-type')

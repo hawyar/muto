@@ -4,7 +4,6 @@ import { nodeExternalsPlugin } from 'esbuild-node-externals'
 import fs from 'fs'
 import os from 'os'
 import download from 'download'
-import pc from "picocolors"
 
 async function build () {
   const semver = '6.0.0'
@@ -22,20 +21,16 @@ async function build () {
     throw new Error('unsupported-platform: windows')
   }
 
+  const url = `https://github.com/johnkerl/miller/releases/download/v${semver}/miller_${semver}_${osMap[os.platform()]}_${os.arch()}.tar.gz`
+
   if (!fs.existsSync(bin)) {
-    await download(
-            `https://github.com/johnkerl/miller/releases/download/v${semver}/miller_${semver}_${
-                osMap[os.platform()]
-            }_${os.arch()}.tar.gz`,
-            path.join(process.cwd(), mlr),
-            {
-              extract: true
-            }
-    )
-      .catch((err) => {
-        console.error(err)
-        process.exit(1)
-      })
+    await download(url, path.join(process.cwd(), mlr), {
+      extract: true
+
+    }).catch((err) => {
+      console.error(err)
+      process.exit(1)
+    })
       .finally(() => {
         console.log(`Downloaded mlr@v${semver} into ${bin}`)
         fs.renameSync(path.join(process.cwd(), mlr, 'mlr'), bin)
@@ -48,13 +43,13 @@ async function build () {
           }
         })
       })
-    } else {
+  } else {
     console.log('Miller already installed')
   }
 
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    // minify: true,
+    minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',
@@ -66,7 +61,7 @@ async function build () {
 
   const cjs = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
-    // minify: true,
+    minify: true,
     bundle: true,
     target: 'es6',
     platform: 'node',

@@ -21,8 +21,6 @@ class Analyzer {
   }
 
   analyze (): ExecutePlan {
-    console.log('analyzing query:')
-
     const mlr = millerCmd()
 
     this.plan.cmd = mlr.getPath()
@@ -49,10 +47,12 @@ class Analyzer {
       const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, '_')
 
       if (!this.catalog.source.columns.includes(singleField)) {
-        throw new Error(`column-not-found: ${singleField}`)
+        throw new Error(`Column not found,  ${singleField}`)
       }
 
-      this.plan.args = mlr.csvInput().jsonOutput().implicitCsvHeader(this.catalog.getColumns()).fileSource(source).getArgs()
+      console.log('column:', this.stmt.columns[0].name)
+
+      this.plan.args = mlr.csvInput().jsonOutput().cut([this.stmt.columns[0].name]).fileSource(source).getArgs()
       return this.plan
     }
 

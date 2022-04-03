@@ -14,6 +14,7 @@ declare class Miller {
     implicitCsvHeader(fields: string[]): Miller;
     count(): Miller;
     cat(): Miller;
+    cut(fields: string[]): Miller;
     head(count: number): Miller;
     determinePath(): void;
 }

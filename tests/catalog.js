@@ -8,7 +8,10 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 tap.test('create catalog', async (t) => {
   const catalog = await createCatalog({
     source: path.join(dirname, 'fixture', 'sales.csv'),
-    destination: path.join(dirname, 'fixture', 'sales.json')
+    destination: path.join(dirname, 'fixture', 'sales.json'),
+    onEnd: () => {
+      console.log('beep boop beep bop')
+    }
   })
   t.same([
     'Region',
@@ -26,6 +29,6 @@ tap.test('create catalog', async (t) => {
     'Total Cost',
     'Total Profit'
   ], catalog.getColumns())
-  t.same(catalog.getDestination().path.base, "sales.json")
+  t.same(catalog.getDestination().path.base, 'sales.json')
   t.end()
 })

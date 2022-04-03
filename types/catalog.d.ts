@@ -29,6 +29,7 @@ export interface CatalogOptions {
     quotes: boolean;
     output: DataType;
     delimiter: Delimiter;
+    onEnd?: () => void;
 }
 export declare class Catalog {
     source: Metadata;

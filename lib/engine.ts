@@ -19,6 +19,8 @@ async function query (raw: string, opt: CatalogOptions): Promise<void> {
 
   const plan = createPlan(catalog, query.getStmt())
 
+  console.log('mlr' + ' ' + plan.args.join(' '))
+
   const proc = spawn(plan.cmd, plan.args)
 
   proc.on('error', (err) => {
@@ -28,6 +30,14 @@ async function query (raw: string, opt: CatalogOptions): Promise<void> {
   if (proc.stdout === null) {
     throw new Error('stdout is null')
   }
+
+  proc.stdout.on('close', () => {
+    if (opt.onEnd !== undefined) {
+      opt.onEnd()
+      return
+    }
+    console.log('✓ query complete ')
+  })
 
   proc.stdout.pipe(createWriteStream(opt.destination))
 }

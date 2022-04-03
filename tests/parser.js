@@ -29,3 +29,8 @@ tap.test('where clause', async (t) => {
   }, parser('select team, score from dd where team = "sd5432"').getWhere())
   t.end()
 })
+
+tap.test('select * from store where item == "green" group by color ', async (t) => {
+  t.same(['color', 'size'], parser('select * from store where item == "green" group by color, size').getGroupBy())
+  t.end()
+})
