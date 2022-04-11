@@ -42,12 +42,12 @@ export declare class Catalog {
     getOptions(): CatalogOptions;
     getColumns(): string[];
     rowCount(): Promise<void>;
-    columnHeader(): Promise<void>;
     validateSource(): Promise<void>;
-    validateDestination(): Promise<void>;
+    validateDestination(): void;
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
     sanitizeColumnNames(columns: string[]): string[];
+    columnHeader(): Promise<void>;
     preview(): Promise<void>;
 }
 export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;

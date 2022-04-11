@@ -1,6 +1,6 @@
 ## muto
 
-> Run ad-hoc SQL queries on CSV JSON
+> Run ad-hoc SQL query on CSV and JSON
 
 ![Tests](https://github.com/hawyar/muto/actions/workflows/test.yml/badge.svg)
 

@@ -8,3 +8,4 @@ tests/example
 coverage
 .nyc_output
 .nova
+.vscode

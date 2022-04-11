@@ -1,16 +1,13 @@
-import isInstalledGlobally from 'is-installed-globally'
 import { join } from 'path'
-import { cwd } from 'process'
-import { existsSync } from 'fs'
-import { execSync } from 'child_process'
 
+// TODO: improve the type using template literals for the args
 class Miller {
   path: string
   version: string
   args: string[]
   constructor () {
     this.version = '6.0.0'
-    this.path = join(cwd(), 'node_modules', '.bin', 'mlr@v' + this.version)
+    this.path = ''
     this.args = []
   }
 
@@ -73,8 +70,17 @@ class Miller {
     return this
   }
 
+  // preserveHeaderColumnOrder (): Miller {
+  //   if (!this.args.includes('cut')) {
+  //     throw new Error('cut must be specified before choosing to preserve header column order')
+  //   }
+  //   this.args.push('-o')
+  //   return this
+  // }
+
   cut (fields: string[]): Miller {
-    this.args.push(`cut -o -f ${fields.join(',')}`)
+    const wihthQuotes = fields.map(f => `"${f}"`)
+    this.args.push(`cut -o -f ${wihthQuotes.join(',')}`)
     return this
   }
 
@@ -84,24 +90,8 @@ class Miller {
   }
 
   determinePath (): void {
-    if (isInstalledGlobally) {
-      const stdout = execSync('npm root -g')
-
-      if (stdout === null) {
-        throw new Error('Failed to find global miller path')
-      }
-
-      const global = join(stdout.toString().trim(), 'muto', 'node_modules', '.bin', 'mlr@' + this.version)
-
-      if (existsSync(global)) {
-        this.path = global
-      }
-      return
-    }
-
-    if (this.path === '') {
-      this.path = join(cwd(), 'node_modules', '.bin', 'mlr@' + this.version)
-    }
+    // TODO: if installed globally then use global npm path
+    this.path = join('node_modules', '.bin', 'mlr@v' + this.version)
   }
 }
 

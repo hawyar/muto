@@ -93,7 +93,10 @@ async function run () {
     process.exit(1)
   }
 
-  await query(args._[1], input)
+  await query(args._[1], input).catch(err => {
+    print(`${pc.red('Error: ')} ${err.message}`)
+    process.exit(1)
+  })
   process.exit(0)
 }
 

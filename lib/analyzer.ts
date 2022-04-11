@@ -44,28 +44,28 @@ class Analyzer {
         return this.plan
       }
 
-      const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, '_')
+      // const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, '_')
 
-      if (!this.catalog.source.columns.includes(singleField)) {
-        throw new Error(`Column not found,  ${singleField}`)
-      }
+      // if (!this.catalog.source.columns.includes(singleField)) {
+      //   throw new Error(`Column not found,  ${singleField}`)
+      // }
 
-      console.log('column:', this.stmt.columns[0].name)
-
+      console.log(this.catalog.getColumns())
+      console.log('columns:', this.stmt.columns[0].name)
       this.plan.args = mlr.csvInput().jsonOutput().cut([this.stmt.columns[0].name]).fileSource(source).getArgs()
       return this.plan
     }
 
     if (this.stmt.columns.length > 1) {
       const fields = this.stmt.columns.map(column => {
-        const sanitized = column.name.replace(/[^a-zA-Z0-9]/g, '_')
-        if (!this.catalog.source.columns.includes(sanitized)) {
+        // const sanitized = column.name.replace(/[^a-zA-Z0-9]/g, '_')
+        if (!this.catalog.source.columns.includes(column.name)) {
           throw new Error(`column ${column.name} is not in the list of columns`)
         }
-        return sanitized
-      }).join(',')
+        return `"${column.name}"`
+      })
 
-      this.plan.args = ['--icsv', '--ojson', '--implicit-csv-header', 'label', `${this.catalog.source.columns.join(',')}`, 'then', 'cut', '-o', '-f', fields, source]
+      this.plan.args = mlr.csvInput().jsonOutput().cut(fields).fileSource(source).getArgs()
       return this.plan
     }
 

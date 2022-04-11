@@ -128,27 +128,6 @@ export class Catalog {
     this.source.rowCount = rowCount[0].count
   }
 
-  async columnHeader (): Promise<void> {
-    const mlr = millerCmd()
-    const args = mlr.getCmd() + ' ' + mlr.jsonOutput().head(1).fileSource(this.options.source).getArgs().join(' ')
-
-    const header = await execify(args)
-
-    if (header.stderr !== '') {
-      throw new Error(`failed-to-get-header-column: ${header.stderr}`)
-    }
-    const columns = JSON.parse(header.stdout)
-
-    if (columns.length === 0) {
-      throw new Error('failed-to-get-header-column: no columns found')
-    }
-
-    for (const c in columns[0]) {
-      this.source.columns.push(columns[0][c])
-    }
-    this.source.header = true
-  }
-
   async validateSource (): Promise<void> {
     const fstat = await stat(this.options.source)
 
@@ -167,25 +146,37 @@ export class Catalog {
     this.source.path = path.parse(this.options.source)
   }
 
-  async validateDestination (): Promise<void> {
-    this.destination.path = path.parse(this.options.destination)
+  validateDestination (): void {
+    const dest = path.parse(this.options.destination)
+    if (dest.ext === '.csv') {
+      this.destination.type = 'csv'
+      this.destination.path = dest
+      return
+    }
+
+    if (dest.ext === '.json') {
+      this.destination.type = 'json'
+      this.destination.path = dest
+      return
+    }
+    throw new Error('Destination file extension is not supported')
   }
 
   async fileType (): Promise<void> {
     if (os.platform() !== 'linux' && os.platform() !== 'darwin') {
-      throw new Error('unsupported-platform')
+      throw new Error('Unsupported platform')
     }
-
     const { stdout, stderr } = await execify(`file ${this.options.source} --mime-type`)
 
     if (stderr !== '') {
-      throw new Error(`failed-to-detect-mime-type: ${stderr}`)
+      throw new Error(stderr)
     }
 
     const mimeType = stdout.split(':')[1].trim()
 
     if (mimeType === 'application/json') {
-      throw new Error('failed-to-detect-mime-type')
+      this.source.type = 'json'
+      return
     }
 
     if (mimeType === 'application/csv') {
@@ -208,35 +199,26 @@ export class Catalog {
       return
     }
 
-    // TODO: find a better way! we could still be wrong
     const rl = createInterface({
       input: createReadStream(this.options.source)
     })
 
-    let first = ''
-
     rl.on('line', line => {
-      first = line
-      rl.close()
-    })
-
-    rl.on('close', () => {
-      if (first.startsWith('{') || first.startsWith('[')) {
-        return true
+      if (line === '') {
+        throw new Error('Failed to detect file type')
       }
 
-      if (this.options.delimiter === undefined) {
-        const firstLineSplit = first.split(this.options.delimiter)
-
-        if (firstLineSplit.length === this.source.columns.length) {
-          this.source.type = 'csv'
-          return true
-        }
+      if (line.includes('{')) {
+        this.source.type = 'json'
+        return
       }
 
-      throw new Error('failed-to-detect-mime-type')
+      if (line.includes('"') || line.includes(',') || line.includes('\n')) {
+        this.source.type = 'csv'
+        return
+      }
+      throw new Error('Failed to detect file type')
     })
-    throw Error(`Unsupported file type ${mimeType}`)
   }
 
   async fileSize (): Promise<void> {
@@ -246,6 +228,56 @@ export class Catalog {
 
   sanitizeColumnNames (columns: string[]): string[] {
     return columns.map(column => column.replace(/[^a-zA-Z0-9]/g, '_'))
+  }
+
+  async columnHeader (): Promise<void> {
+    if (this.source.type === 'csv') {
+      const mlr = millerCmd()
+      const args = mlr.getCmd() + ' ' + mlr.jsonOutput().head(1).fileSource(this.options.source).getArgs().join(' ')
+
+      const header = await execify(args)
+
+      if (header.stderr !== '') {
+        throw new Error(`failed-to-get-header-column: ${header.stderr}`)
+      }
+      const columns = JSON.parse(header.stdout)
+
+      if (columns.length === 0) {
+        throw new Error('failed-to-get-header-column: no columns found')
+      }
+
+      for (const c in columns[0]) {
+        this.source.columns.push(columns[0][c])
+      }
+      this.source.header = true
+      return
+    }
+
+    if (this.source.type === 'json') {
+      const mlr = millerCmd()
+      const args = mlr.getCmd() + ' ' + mlr.jsonInput().jsonOutput().head(1).fileSource(this.options.source).getArgs().join(' ')
+
+      const header = await execify(args)
+
+      if (header.stderr !== '') {
+        throw new Error(`failed-to-get-header-column: ${header.stderr}`)
+      }
+
+      const columns = JSON.parse(header.stdout)
+
+      if (columns.length === 0) {
+        throw new Error('failed-to-get-header-column: no columns found')
+      }
+
+      for (const c in columns[0]) {
+        this.source.columns.push(c)
+      }
+
+      this.source.header = true
+      return
+    }
+
+    throw new Error('Failed to get header column')
   }
 
   async preview (): Promise<void> {
@@ -309,20 +341,12 @@ export async function createCatalog (opt: CatalogOptions): Promise<Catalog> {
       }
     }
 
-    const catalog = new Catalog(catalogOpt)
+    const c = new Catalog(catalogOpt)
 
-    Promise.all([
-      catalog.validateSource(),
-      catalog.validateDestination(),
-      catalog.columnHeader(),
-      catalog.fileSize(),
-      catalog.fileType(),
-      catalog.rowCount()
-    ])
-      .then(() => {
-        console.log(`created catalog ${catalog.getSource().path.name}`)
-        resolve(catalog)
-      })
-      .catch((err) => reject(err))
+    Promise.all([c.validateSource(), c.validateDestination(), c.fileType(), c.rowCount(), c.fileSize(), c.columnHeader()]).then(() => {
+      resolve(c)
+    }).catch(err => {
+      reject(err)
+    })
   })
 }
