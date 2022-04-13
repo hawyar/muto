@@ -16,7 +16,6 @@ declare class Miller {
     cat(): Miller;
     cut(fields: string[]): Miller;
     head(count: number): Miller;
-    determinePath(): void;
 }
 export declare function millerCmd(): Miller;
 export {};

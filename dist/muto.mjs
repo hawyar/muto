@@ -1,2 +1,605 @@
-var l=(i,t,r)=>new Promise((e,s)=>{var n=o=>{try{a(r.next(o))}catch(u){s(u)}},c=o=>{try{a(r.throw(o))}catch(u){s(u)}},a=o=>o.done?e(o.value):Promise.resolve(o.value).then(n,c);a((r=r.apply(i,t)).next())});import h from"path";import{createInterface as O}from"readline";import y from"os";import{constants as P,createReadStream as b}from"fs";import{exec as j}from"child_process";import A from"util";import{access as M,stat as v}from"fs/promises";import{join as x}from"path";var d=class{constructor(){this.version="6.0.0",this.path="",this.args=[]}getCmd(){return this.path}getArgs(){return this.args}getPath(){if(this.path==="")throw new Error("miller-path-not-set: missing miller binary path");return this.path}fileSource(t){if(this.args.length===0)throw new Error("First specifiy the arguments then add the source file");return this.args.push(t),this}csvInput(){return this.args.push("--icsv"),this}jsonInput(){return this.args.push("--ijson"),this}csvOutput(){return this.args.push("--ocsv"),this}jsonOutput(){return this.args.push("--ojson"),this}implicitCsvHeader(t){return this.args.push(`--implicit-csv-header label ${t.join(",")}`),this}count(){return this.args.push("count"),this}cat(){return this.args.push("cat"),this}cut(t){let r=t.map(e=>`"${e}"`);return this.args.push(`cut -o -f ${r.join(",")}`),this}head(t){return this.args.push(`head -n ${t}`),this}determinePath(){this.path=x("node_modules",".bin","mlr@v"+this.version)}};function m(){let i=new d;return i.determinePath(),i}var p=A.promisify(j),f=class{constructor(t){this.options=t,this.createdAt=new Date,this.source={path:{root:"",dir:"",base:"",ext:"",name:""},type:"csv",columns:[],header:!1,fileSize:0,rowCount:0,spanMultipleLines:!1,quotes:!1,delimiter:",",errors:{},warnings:{},preview:[]},this.destination={path:{root:"",dir:"",base:"",ext:"",name:""},type:"csv",columns:[],header:!1,fileSize:0,rowCount:0,spanMultipleLines:!1,quotes:!1,delimiter:",",errors:{},warnings:{},preview:[]}}getSource(){return this.source}getDestination(){return this.destination}getOptions(){return this.options}getColumns(){return this.source.columns}rowCount(){return l(this,null,function*(){let t=m(),r=t.getCmd()+" "+t.jsonOutput().count().fileSource(this.options.source).getArgs().join(" "),e=yield p(r);if(e.stderr!=="")throw new Error(`failed-to-get-row-count: ${e.stderr}`);let s=JSON.parse(e.stdout);if(s.length===0)throw new Error("failed-to-get-row-count: no rows found");if(s[0].count===void 0)throw new Error("failed-to-get-row-count: no count found");this.source.rowCount=s[0].count})}validateSource(){return l(this,null,function*(){let t=yield v(this.options.source);if(!t.isFile())throw Error("Source path is not a file");if(yield M(this.options.source,P.R_OK).catch(()=>{throw Error("Source file is not readable")}),t.size===0)throw Error("Source file is empty");this.source.path=h.parse(this.options.source)})}validateDestination(){let t=h.parse(this.options.destination);if(t.ext===".csv"){this.destination.type="csv",this.destination.path=t;return}if(t.ext===".json"){this.destination.type="json",this.destination.path=t;return}throw new Error("Destination file extension is not supported")}fileType(){return l(this,null,function*(){if(y.platform()!=="linux"&&y.platform()!=="darwin")throw new Error("Unsupported platform");let{stdout:t,stderr:r}=yield p(`file ${this.options.source} --mime-type`);if(r!=="")throw new Error(r);let e=t.split(":")[1].trim();if(e==="application/json"){this.source.type="json";return}if(e==="application/csv"){this.source.type="csv";return}if(e==="application/json"){this.source.type="json";return}if(e==="text/csv"){this.source.type="csv";return}if(e==="text/plain"){this.source.type="csv";return}O({input:b(this.options.source)}).on("line",n=>{if(n==="")throw new Error("Failed to detect file type");if(n.includes("{")){this.source.type="json";return}if(n.includes('"')||n.includes(",")||n.includes(`
-`)){this.source.type="csv";return}throw new Error("Failed to detect file type")})})}fileSize(){return l(this,null,function*(){let t=yield v(this.options.source);this.source.fileSize=t.size})}sanitizeColumnNames(t){return t.map(r=>r.replace(/[^a-zA-Z0-9]/g,"_"))}columnHeader(){return l(this,null,function*(){if(this.source.type==="csv"){let t=m(),r=t.getCmd()+" "+t.jsonOutput().head(1).fileSource(this.options.source).getArgs().join(" "),e=yield p(r);if(e.stderr!=="")throw new Error(`failed-to-get-header-column: ${e.stderr}`);let s=JSON.parse(e.stdout);if(s.length===0)throw new Error("failed-to-get-header-column: no columns found");for(let n in s[0])this.source.columns.push(s[0][n]);this.source.header=!0;return}if(this.source.type==="json"){let t=m(),r=t.getCmd()+" "+t.jsonInput().jsonOutput().head(1).fileSource(this.options.source).getArgs().join(" "),e=yield p(r);if(e.stderr!=="")throw new Error(`failed-to-get-header-column: ${e.stderr}`);let s=JSON.parse(e.stdout);if(s.length===0)throw new Error("failed-to-get-header-column: no columns found");for(let n in s[0])this.source.columns.push(n);this.source.header=!0;return}throw new Error("Failed to get header column")})}preview(){return l(this,null,function*(){let t=m(),r=t.getCmd()+t.jsonOutput().head(5).fileSource(this.options.source).getArgs().join(" "),e=yield p(r);if(e.stderr!=="")throw new Error(e.stderr);let s=JSON.parse(e.stdout);if(s.length===0)throw new Error("failed-to-get-preview: no rows found");this.source.preview=s})}};function C(i){return l(this,null,function*(){return yield new Promise((t,r)=>{i===void 0&&r(new Error("missing-catalog-options")),(i.source===void 0||i.source==="")&&r(new Error("failed-to-create-catalog: no source provided")),(i.destination===void 0||i.destination==="")&&r(new Error("failed-to-create-catalog: no destination provided"));let e=Object.assign({},i);if(i.input===void 0)switch(h.extname(i.source)){case".csv":e.input="csv";break;case".json":e.input="json";break;default:r(new Error("failed-to-create-catalog: unsupported input file type"))}if(i.output===void 0)switch(h.extname(i.destination)){case".csv":e.output="csv";break;case".json":e.output="json";break;default:r(new Error("failed-to-create-catalog: unsupported output file type"))}let s=new f(e);Promise.all([s.validateSource(),s.validateDestination(),s.fileType(),s.rowCount(),s.fileSize(),s.columnHeader()]).then(()=>{t(s)}).catch(n=>{r(n)})})})}var g=class{constructor(t,r){this.stmt=r,this.catalog=t,this.plan={cmd:"",args:[]}}analyze(){let t=m();if(this.plan.cmd=t.getPath(),this.stmt.type!=="select")throw Error("Only select queries are supported at this time");if(this.stmt.from.length!==1)throw Error("Multi-table queries are not supported");let r=this.stmt.from[0].relname;console.log("table:",r);let e=this.catalog.options.source;if(this.stmt.columns.length===1)return this.stmt.columns[0].name==="*"?(console.log("columns: *"),this.plan.args=t.csvInput().jsonOutput().cat().fileSource(e).getArgs(),this.plan):(console.log(this.catalog.getColumns()),console.log("columns:",this.stmt.columns[0].name),this.plan.args=t.csvInput().jsonOutput().cut([this.stmt.columns[0].name]).fileSource(e).getArgs(),this.plan);if(this.stmt.columns.length>1){let s=this.stmt.columns.map(n=>{if(!this.catalog.source.columns.includes(n.name))throw new Error(`column ${n.name} is not in the list of columns`);return`"${n.name}"`});return this.plan.args=t.csvInput().jsonOutput().cut(s).fileSource(e).getArgs(),this.plan}throw Error("Error: no columns specified")}};function E(i,t){return new g(i,t).analyze()}import{parse as R}from"pgsql-parser";var w=class{constructor(t){this.query=t,this.stmt={type:"",distinct:!1,columns:[{name:"",type:""}],from:[{schemaname:"",relname:"",inh:""}],sort:{},where:{operator:"",left:"",right:""},groupBy:[],having:[],orderBy:[],limit:{type:"",val:""}}}getStmt(){return this.stmt}getColumns(){return this.stmt.columns.map(t=>t.name)}isDistinct(){return this.stmt.distinct}getWhere(){return this.stmt.where}limit(){return parseInt(this.stmt.limit.val)}getTable(){return this.stmt.from[0].relname}getType(){return this.stmt.type}getGroupBy(){return this.stmt.groupBy}parse(){var n,c;let t=this.query;if(t.trim()==="")throw new Error("invalid-query: no query found");let r=R(t);Object.keys(r[0].RawStmt.stmt)[0]==="SelectStmt"&&(this.stmt.type="select");let e=r[0].RawStmt.stmt.SelectStmt,s=e.limitOption;if(s==="LIMIT_OPTION_DEFAULT"&&(this.stmt.limit={type:e.limitOption,val:""}),s==="LIMIT_OPTION_COUNT"&&e.limitCount!==""&&(this.stmt.limit={type:e.limitOption,val:e.limitCount.A_Const.val.Integer.ival}),e.distinctClause!==void 0&&(this.stmt.distinct=!0),e.targetList!==void 0&&(this.stmt.columns=e.targetList.map(a=>{let o=a.ResTarget.val.ColumnRef.fields[0];return o.A_Star!==void 0?{name:"*"}:{name:o.String.str}})),e.fromClause!==void 0&&(this.stmt.from=e.fromClause.map(a=>{let o={schemaname:"",relname:"",inh:""},u=a.RangeVar;return u.schemaname!==void 0&&(o.schemaname=u.schemaname),u.relname!==void 0&&(o.relname=u.relname),u.inh!==void 0&&(o.inh=u.inh),o})),e.groupClause!==void 0){let a=e.groupClause.map(o=>o.ColumnRef.fields[0].String.str);this.stmt.groupBy=a}if(e.whereClause!==void 0){if(e.whereClause!==null&&((n=e==null?void 0:e.whereClause)==null?void 0:n.A_Expr.kind)==="AEXPR_OP"){let a=e.whereClause.A_Expr,o={operator:"",left:"",right:""};o.operator=a.name[0].String.str,a.lexpr!==void 0&&(o.left=a.lexpr.ColumnRef.fields[0].String.str),a.rexpr!==void 0&&(a.rexpr.ColumnRef!==void 0&&Object.keys(a.rexpr.ColumnRef.fields[0]).includes("String")&&(o.right=a.rexpr.ColumnRef.fields[0].String.str),a.rexpr.A_Const!==void 0&&(o.right=a.rexpr.A_Const.val.Integer.ival)),this.stmt.where=o}e.whereClause.A_Expr!==void 0&&((c=e==null?void 0:e.whereClause)==null||c.A_Expr.kind),e.whereClause.BoolExpr!==void 0&&(e.whereClause.BoolExpr.boolop,e.whereClause.BoolExpr.boolop)}return this.stmt}};function S(i){let t=new w(i);return t.parse(),t}import{spawn as T}from"child_process";import{createWriteStream as _}from"fs";function rt(i,t){return l(this,null,function*(){if(i===void 0||i==="")throw new Error("No query provided");let r=S(i);if(r.getType()!=="select")throw new Error("Only select queries are supported at this time");let e=yield C(t),s=E(e,r.getStmt());console.log(`${s.cmd} ${s.args.join(" ")}`);let n=T(s.cmd,s.args);n.stdout.on("close",()=>{if(t.onEnd!==void 0){t.onEnd();return}console.log("query complete")}),n.on("error",c=>{console.error(c),process.exit(1)}),n.on("exit",c=>{c!==0&&process.exit(c)}),n.stdout.pipe(_(t.destination))})}export{C as createCatalog,S as parser,rt as query};
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+
+// lib/catalog.ts
+import path from "path";
+import os from "os";
+import { constants } from "fs";
+import { exec } from "child_process";
+import util from "util";
+import { access, stat } from "fs/promises";
+
+// lib/miller.ts
+import { join } from "path";
+import { cwd } from "process";
+var Miller = class {
+  constructor() {
+    this.version = "6.0.0";
+    this.path = join(cwd(), "node_modules", "muto", "node_modules", ".bin", "mlr@v" + this.version);
+    this.args = [];
+  }
+  getCmd() {
+    return this.path;
+  }
+  getArgs() {
+    return this.args;
+  }
+  getPath() {
+    if (this.path === "") {
+      throw new Error("miller-path-not-set: missing miller binary path");
+    }
+    return this.path;
+  }
+  fileSource(file) {
+    if (this.args.length === 0) {
+      throw new Error("First specifiy the arguments then add the source file");
+    }
+    this.args.push(file);
+    return this;
+  }
+  csvInput() {
+    this.args.push("--icsv");
+    return this;
+  }
+  jsonInput() {
+    this.args.push("--ijson");
+    return this;
+  }
+  csvOutput() {
+    this.args.push("--ocsv");
+    return this;
+  }
+  jsonOutput() {
+    this.args.push("--ojson");
+    return this;
+  }
+  implicitCsvHeader(fields) {
+    this.args.push(`--implicit-csv-header label ${fields.join(",")}`);
+    return this;
+  }
+  count() {
+    this.args.push("count");
+    return this;
+  }
+  cat() {
+    this.args.push("cat");
+    return this;
+  }
+  cut(fields) {
+    this.args.push(`cut -f ${fields[0].trim()}`);
+    return this;
+  }
+  head(count) {
+    this.args.push(`head -n ${count}`);
+    return this;
+  }
+};
+function millerCmd() {
+  return new Miller();
+}
+
+// lib/catalog.ts
+var execify = util.promisify(exec);
+var Catalog = class {
+  constructor(options) {
+    this.options = options;
+    this.createdAt = new Date();
+    this.source = {
+      path: {
+        root: "",
+        dir: "",
+        base: "",
+        ext: "",
+        name: ""
+      },
+      type: "csv",
+      columns: [],
+      header: false,
+      fileSize: 0,
+      rowCount: 0,
+      spanMultipleLines: false,
+      quotes: false,
+      delimiter: ",",
+      errors: {},
+      warnings: {},
+      preview: []
+    };
+    this.destination = {
+      path: {
+        root: "",
+        dir: "",
+        base: "",
+        ext: "",
+        name: ""
+      },
+      type: "csv",
+      columns: [],
+      header: false,
+      fileSize: 0,
+      rowCount: 0,
+      spanMultipleLines: false,
+      quotes: false,
+      delimiter: ",",
+      errors: {},
+      warnings: {},
+      preview: []
+    };
+  }
+  getSource() {
+    return this.source;
+  }
+  getDestination() {
+    return this.destination;
+  }
+  getOptions() {
+    return this.options;
+  }
+  getColumns() {
+    return this.source.columns;
+  }
+  rowCount() {
+    return __async(this, null, function* () {
+      const mlr = millerCmd();
+      const args = mlr.getCmd() + " " + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(" ");
+      const count = yield execify(args);
+      if (count.stderr !== "") {
+        throw new Error(`failed-to-get-row-count: ${count.stderr}`);
+      }
+      const rowCount = JSON.parse(count.stdout);
+      if (rowCount.length === 0) {
+        throw new Error("failed-to-get-row-count: no rows found");
+      }
+      if (rowCount[0].count === void 0) {
+        throw new Error("failed-to-get-row-count: no count found");
+      }
+      this.source.rowCount = rowCount[0].count;
+    });
+  }
+  validateSource() {
+    return __async(this, null, function* () {
+      const fstat = yield stat(this.options.source);
+      if (!fstat.isFile()) {
+        throw Error("Source path is not a file");
+      }
+      yield access(this.options.source, constants.R_OK).catch(() => {
+        throw Error("Source file is not readable");
+      });
+      if (fstat.size === 0) {
+        throw Error("Source file is empty");
+      }
+      this.source.path = path.parse(this.options.source);
+    });
+  }
+  validateDestination() {
+    const dest = path.parse(this.options.destination);
+    if (dest.ext === ".csv") {
+      this.destination.type = "csv";
+      this.destination.path = dest;
+      return;
+    }
+    if (dest.ext === ".json") {
+      this.destination.type = "json";
+      this.destination.path = dest;
+      return;
+    }
+    throw new Error("Destination file extension is not supported");
+  }
+  fileType() {
+    return __async(this, null, function* () {
+      if (os.platform() !== "linux" && os.platform() !== "darwin") {
+        throw new Error("Unsupported platform");
+      }
+      const { stdout, stderr } = yield execify(`file ${this.options.source} --mime-type`);
+      if (stderr !== "") {
+        throw new Error(stderr);
+      }
+      const mimeType = stdout.split(":")[1].trim();
+      if (mimeType === "application/json") {
+        this.source.type = "json";
+        return;
+      }
+      if (mimeType === "application/csv") {
+        this.source.type = "csv";
+        return;
+      }
+      if (mimeType === "application/json") {
+        this.source.type = "json";
+        return;
+      }
+      if (mimeType === "text/csv") {
+        this.source.type = "csv";
+        return;
+      }
+      if (mimeType === "text/plain") {
+        this.source.type = "csv";
+        return;
+      }
+      throw new Error("Unsupported file type");
+    });
+  }
+  fileSize() {
+    return __async(this, null, function* () {
+      const fstat = yield stat(this.options.source);
+      this.source.fileSize = fstat.size;
+    });
+  }
+  sanitizeColumnNames(columns) {
+    return columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
+  }
+  columnHeader() {
+    return __async(this, null, function* () {
+      if (this.source.type === "csv") {
+        const mlr = millerCmd();
+        const args = mlr.getCmd() + " " + mlr.jsonOutput().head(1).fileSource(this.options.source).getArgs().join(" ");
+        const header = yield execify(args);
+        if (header.stderr !== "") {
+          throw new Error(`failed-to-get-header-column: ${header.stderr}`);
+        }
+        const columns = JSON.parse(header.stdout);
+        if (columns.length === 0) {
+          throw new Error("failed-to-get-header-column: no columns found");
+        }
+        for (const c in columns[0]) {
+          this.source.columns.push(columns[0][c]);
+        }
+        this.source.header = true;
+        return;
+      }
+      if (this.source.type === "json") {
+        const mlr = millerCmd();
+        const args = mlr.getCmd() + " " + mlr.jsonInput().jsonOutput().head(1).fileSource(this.options.source).getArgs().join(" ");
+        const header = yield execify(args);
+        if (header.stderr !== "") {
+          throw new Error(`failed-to-get-header-column: ${header.stderr}`);
+        }
+        const columns = JSON.parse(header.stdout);
+        if (columns.length === 0) {
+          throw new Error("failed-to-get-header-column: no columns found");
+        }
+        for (const c in columns[0]) {
+          this.source.columns.push(c);
+        }
+        this.source.header = true;
+        return;
+      }
+      throw new Error("Failed to get header column");
+    });
+  }
+  preview() {
+    return __async(this, null, function* () {
+      const mlr = millerCmd();
+      const args = mlr.getCmd() + mlr.jsonOutput().head(5).fileSource(this.options.source).getArgs().join(" ");
+      const preview = yield execify(args);
+      if (preview.stderr !== "") {
+        throw new Error(preview.stderr);
+      }
+      const rows = JSON.parse(preview.stdout);
+      if (rows.length === 0) {
+        throw new Error("failed-to-get-preview: no rows found");
+      }
+      this.source.preview = rows;
+    });
+  }
+};
+function createCatalog(opt) {
+  return __async(this, null, function* () {
+    return yield new Promise((resolve, reject) => {
+      if (opt === void 0) {
+        reject(new Error("missing-catalog-options"));
+      }
+      if (opt.source === void 0 || opt.source === "") {
+        reject(new Error("failed-to-create-catalog: no source provided"));
+      }
+      if (opt.destination === void 0 || opt.destination === "") {
+        reject(new Error("failed-to-create-catalog: no destination provided"));
+      }
+      const catalogOpt = Object.assign({}, opt);
+      if (opt.input === void 0) {
+        switch (path.extname(opt.source)) {
+          case ".csv":
+            catalogOpt.input = "csv";
+            break;
+          case ".json":
+            catalogOpt.input = "json";
+            break;
+          default:
+            reject(new Error("failed-to-create-catalog: unsupported input file type"));
+        }
+      }
+      if (opt.output === void 0) {
+        switch (path.extname(opt.destination)) {
+          case ".csv":
+            catalogOpt.output = "csv";
+            break;
+          case ".json":
+            catalogOpt.output = "json";
+            break;
+          default:
+            reject(new Error("failed-to-create-catalog: unsupported output file type"));
+        }
+      }
+      const c = new Catalog(catalogOpt);
+      Promise.all([c.validateSource(), c.validateDestination(), c.fileType(), c.rowCount(), c.fileSize(), c.columnHeader()]).then(() => {
+        resolve(c);
+      }).catch((err) => {
+        reject(err);
+      });
+    });
+  });
+}
+
+// lib/analyzer.ts
+var Analyzer = class {
+  constructor(catalog, stmt) {
+    this.stmt = stmt;
+    this.catalog = catalog;
+    this.plan = {
+      cmd: "",
+      args: []
+    };
+  }
+  analyze() {
+    const mlr = millerCmd();
+    this.plan.cmd = mlr.getPath();
+    if (this.stmt.type !== "select") {
+      throw Error("Only select queries are supported at this time");
+    }
+    if (this.stmt.from.length !== 1) {
+      throw Error("Multi-table queries are not supported");
+    }
+    const table = this.stmt.from[0].relname;
+    console.log("table:", table);
+    const source = this.catalog.options.source;
+    if (this.stmt.columns.length === 1) {
+      if (this.stmt.columns[0].name === "*") {
+        console.log("columns: *");
+        this.plan.args = mlr.csvInput().jsonOutput().cat().fileSource(source).getArgs();
+        return this.plan;
+      }
+      const singleField = this.stmt.columns[0].name;
+      if (!this.catalog.source.columns.includes(singleField)) {
+        throw new Error(`Column not found,  ${singleField}`);
+      }
+      console.log("columns:", this.stmt.columns[0].name);
+      this.plan.args = mlr.csvInput().jsonOutput().cut([this.stmt.columns[0].name]).fileSource(source).getArgs();
+      return this.plan;
+    }
+    if (this.stmt.columns.length > 1) {
+      const fields = this.stmt.columns.map((column) => {
+        if (!this.catalog.source.columns.includes(column.name)) {
+          throw new Error(`column ${column.name} is not in the list of columns`);
+        }
+        return `"${column.name}"`;
+      });
+      this.plan.args = mlr.csvInput().jsonOutput().cut(fields).fileSource(source).getArgs();
+      return this.plan;
+    }
+    throw Error("Error: no columns specified");
+  }
+};
+function createPlan(catalog, stmt) {
+  const analyzer = new Analyzer(catalog, stmt);
+  return analyzer.analyze();
+}
+
+// lib/parser.ts
+import { parse as sqlParser } from "pgsql-parser";
+var Parser = class {
+  constructor(raw) {
+    this.query = raw;
+    this.stmt = {
+      type: "",
+      distinct: false,
+      columns: [{
+        name: "",
+        type: ""
+      }],
+      from: [{
+        schemaname: "",
+        relname: "",
+        inh: ""
+      }],
+      sort: {},
+      where: {
+        operator: "",
+        left: "",
+        right: ""
+      },
+      groupBy: [],
+      having: [],
+      orderBy: [],
+      limit: {
+        type: "",
+        val: ""
+      }
+    };
+  }
+  getStmt() {
+    return this.stmt;
+  }
+  getColumns() {
+    return this.stmt.columns.map((c) => c.name);
+  }
+  isDistinct() {
+    return this.stmt.distinct;
+  }
+  getWhere() {
+    return this.stmt.where;
+  }
+  limit() {
+    return parseInt(this.stmt.limit.val);
+  }
+  getTable() {
+    return this.stmt.from[0].relname;
+  }
+  getType() {
+    return this.stmt.type;
+  }
+  getGroupBy() {
+    return this.stmt.groupBy;
+  }
+  parse() {
+    var _a, _b;
+    const raw = this.query;
+    if (raw.trim() === "") {
+      throw new Error("invalid-query: no query found");
+    }
+    const rawAST = sqlParser(raw);
+    if (Object.keys(rawAST[0].RawStmt.stmt)[0] === "SelectStmt") {
+      this.stmt.type = "select";
+    }
+    const ast = rawAST[0].RawStmt.stmt.SelectStmt;
+    const limit = ast.limitOption;
+    if (limit === "LIMIT_OPTION_DEFAULT") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ""
+      };
+    }
+    if (limit === "LIMIT_OPTION_COUNT" && ast.limitCount !== "") {
+      this.stmt.limit = {
+        type: ast.limitOption,
+        val: ast.limitCount.A_Const.val.Integer.ival
+      };
+    }
+    if (ast.distinctClause !== void 0) {
+      this.stmt.distinct = true;
+    }
+    if (ast.targetList !== void 0) {
+      this.stmt.columns = ast.targetList.map((t) => {
+        const col = t.ResTarget.val.ColumnRef.fields[0];
+        if (col.A_Star !== void 0) {
+          return {
+            name: "*"
+          };
+        }
+        return {
+          name: col.String.str
+        };
+      });
+    }
+    if (ast.fromClause !== void 0) {
+      this.stmt.from = ast.fromClause.map((from) => {
+        const source = {
+          schemaname: "",
+          relname: "",
+          inh: ""
+        };
+        const t = from.RangeVar;
+        if (t.schemaname !== void 0) {
+          source.schemaname = t.schemaname;
+        }
+        if (t.relname !== void 0) {
+          source.relname = t.relname;
+        }
+        if (t.inh !== void 0) {
+          source.inh = t.inh;
+        }
+        return source;
+      });
+    }
+    if (ast.groupClause !== void 0) {
+      const group = ast.groupClause.map((g) => {
+        return g.ColumnRef.fields[0].String.str;
+      });
+      this.stmt.groupBy = group;
+    }
+    if (ast.whereClause !== void 0) {
+      if (ast.whereClause !== null && ((_a = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _a.A_Expr.kind) === "AEXPR_OP") {
+        const expr = ast.whereClause.A_Expr;
+        const where = {
+          operator: "",
+          left: "",
+          right: ""
+        };
+        where.operator = expr.name[0].String.str;
+        if (expr.lexpr !== void 0) {
+          where.left = expr.lexpr.ColumnRef.fields[0].String.str;
+        }
+        if (expr.rexpr !== void 0) {
+          if (expr.rexpr.ColumnRef !== void 0 && Object.keys(expr.rexpr.ColumnRef.fields[0]).includes("String")) {
+            where.right = expr.rexpr.ColumnRef.fields[0].String.str;
+          }
+          if (expr.rexpr.A_Const !== void 0) {
+            where.right = expr.rexpr.A_Const.val.Integer.ival;
+          }
+        }
+        this.stmt.where = where;
+      }
+      if (ast.whereClause.A_Expr !== void 0 && ((_b = ast == null ? void 0 : ast.whereClause) == null ? void 0 : _b.A_Expr.kind) === "AEXPR_IN") {
+      }
+      if (ast.whereClause.BoolExpr !== void 0) {
+        if (ast.whereClause.BoolExpr.boolop === "AND_EXPR") {
+        }
+        if (ast.whereClause.BoolExpr.boolop === "OR_EXPR") {
+        }
+      }
+    }
+    return this.stmt;
+  }
+};
+function parser(query2) {
+  const p = new Parser(query2);
+  p.parse();
+  return p;
+}
+
+// lib/engine.ts
+import { createWriteStream } from "fs";
+import { execFile } from "child_process";
+function query(raw, opt) {
+  return __async(this, null, function* () {
+    if (raw === void 0 || raw === "") {
+      throw new Error("No query provided");
+    }
+    const query2 = parser(raw);
+    if (query2.getType() !== "select") {
+      throw new Error("Only select queries are supported at this time");
+    }
+    const catalog = yield createCatalog(opt);
+    const plan = createPlan(catalog, query2.getStmt());
+    yield run(plan, catalog);
+  });
+}
+function run(plan, catalog) {
+  return __async(this, null, function* () {
+    var _a;
+    console.log(`${plan.cmd} ${plan.args.join(" ")}`);
+    const proc = execFile(plan.cmd, plan.args, {
+      maxBuffer: 1024 * 1024 * 1024
+    }, (err, stdout, stderr) => {
+      if (err != null) {
+        console.error(err);
+      }
+      if (stderr !== "") {
+        console.error(stderr);
+      }
+    });
+    if (proc.stdout != null) {
+      (_a = proc.stdout) == null ? void 0 : _a.pipe(createWriteStream(catalog.getOptions().destination));
+    }
+  });
+}
+export {
+  createCatalog,
+  parser,
+  query
+};

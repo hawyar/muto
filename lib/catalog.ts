@@ -1,7 +1,7 @@
 import path, { ParsedPath } from 'path'
-import { createInterface } from 'readline'
+// import { createInterface } from 'readline'
 import os from 'os'
-import { constants, createReadStream } from 'fs'
+import { constants } from 'fs'
 import { exec } from 'child_process'
 import util from 'util'
 import { access, stat } from 'fs/promises'
@@ -199,26 +199,28 @@ export class Catalog {
       return
     }
 
-    const rl = createInterface({
-      input: createReadStream(this.options.source)
-    })
+    throw new Error('Unsupported file type')
 
-    rl.on('line', line => {
-      if (line === '') {
-        throw new Error('Failed to detect file type')
-      }
+    // const rl = createInterface({
+    //   input: createReadStream(this.options.source)
+    // })
 
-      if (line.includes('{')) {
-        this.source.type = 'json'
-        return
-      }
+    // rl.on('line', line => {
+    //   if (line === '') {
+    //     throw new Error('Failed to detect file type')
+    //   }
 
-      if (line.includes('"') || line.includes(',') || line.includes('\n')) {
-        this.source.type = 'csv'
-        return
-      }
-      throw new Error('Failed to detect file type')
-    })
+    //   if (line.includes('{')) {
+    //     this.source.type = 'json'
+    //     return
+    //   }
+
+    //   if (line.includes('"') || line.includes(',') || line.includes('\n')) {
+    //     this.source.type = 'csv'
+    //     return
+    //   }
+    //   throw new Error('Failed to detect file type')
+    // })
   }
 
   async fileSize (): Promise<void> {

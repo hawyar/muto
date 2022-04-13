@@ -1,8 +1,8 @@
 import { createCatalog, CatalogOptions } from './catalog'
 import { createPlan } from './analyzer'
 import { parser } from './parser'
-import { spawn } from 'child_process'
 import { createWriteStream } from 'fs'
+import { execFile } from 'child_process'
 
 async function query (raw: string, opt: CatalogOptions): Promise<void> {
   if (raw === undefined || raw === '') {
@@ -20,28 +20,21 @@ async function query (raw: string, opt: CatalogOptions): Promise<void> {
   const plan = createPlan(catalog, query.getStmt())
 
   console.log(`${plan.cmd} ${plan.args.join(' ')}`)
-
-  const proc = spawn(plan.cmd, plan.args)
-
-  proc.stdout.on('close', () => {
-    if (opt.onEnd !== undefined) {
-      opt.onEnd()
-      return
+  const proc = execFile(plan.cmd, plan.args, {
+    maxBuffer: 1024 * 1024 * 1024
+  }, (err, stdout, stderr) => {
+    if (err != null) {
+      console.error(err)
     }
-    console.log('query complete')
-  })
 
-  proc.on('error', (err) => {
-    console.error(err)
-    process.exit(1)
-  })
-
-  proc.on('exit', (code: number) => {
-    if (code !== 0) {
-      process.exit(code)
+    if (stderr !== '') {
+      console.error(stderr)
     }
   })
-  proc.stdout.pipe(createWriteStream(opt.destination))
+
+  if (proc.stdout != null) {
+    proc.stdout?.pipe(createWriteStream(catalog.getOptions().destination))
+  }
 }
 
 export {

@@ -2,7 +2,7 @@ import { Catalog } from './catalog'
 import { Stmt } from './parser'
 import { millerCmd } from './miller'
 
-interface ExecutePlan {
+export interface ExecutePlan {
   cmd: string
   args: string[]
 }
@@ -32,6 +32,7 @@ class Analyzer {
     if (this.stmt.from.length !== 1) {
       throw Error('Multi-table queries are not supported')
     }
+
     const table = this.stmt.from[0].relname
     console.log('table:', table)
 
@@ -46,11 +47,12 @@ class Analyzer {
 
       // const singleField = this.stmt.columns[0].name.replace(/[^a-zA-Z0-9]/g, '_')
 
-      // if (!this.catalog.source.columns.includes(singleField)) {
-      //   throw new Error(`Column not found,  ${singleField}`)
-      // }
+      const singleField = this.stmt.columns[0].name
 
-      console.log(this.catalog.getColumns())
+      if (!this.catalog.source.columns.includes(singleField)) {
+        throw new Error(`Column not found,  ${singleField}`)
+      }
+
       console.log('columns:', this.stmt.columns[0].name)
       this.plan.args = mlr.csvInput().jsonOutput().cut([this.stmt.columns[0].name]).fileSource(source).getArgs()
       return this.plan
