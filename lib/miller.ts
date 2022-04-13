@@ -8,7 +8,7 @@ class Miller {
   args: string[]
   constructor () {
     this.version = '6.0.0'
-    this.path = join(cwd(), 'node_modules', 'muto', 'node_modules', '.bin', 'mlr@v' + this.version)
+    this.path = ''
     this.args = []
   }
 
@@ -83,10 +83,17 @@ class Miller {
   }
 
   // TODO: if installed globally then use global npm path
-  // determinePath (): void {
-  // }
+  determinePath (): void {
+    if (cwd().split('/').pop() === 'muto') {
+      this.path = join(cwd(), 'node_modules', '.bin', 'mlr@v' + this.version)
+      return
+    }
+    this.path = join(cwd(), 'node_modules', 'muto', 'node_modules', '.bin', 'mlr@v' + this.version)
+  }
 }
 
 export function millerCmd (): Miller {
-  return new Miller()
+  const cmd = new Miller()
+  cmd.determinePath()
+  return cmd
 }

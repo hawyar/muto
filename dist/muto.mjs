@@ -33,7 +33,7 @@ import { cwd } from "process";
 var Miller = class {
   constructor() {
     this.version = "6.0.0";
-    this.path = join(cwd(), "node_modules", "muto", "node_modules", ".bin", "mlr@v" + this.version);
+    this.path = "";
     this.args = [];
   }
   getCmd() {
@@ -84,16 +84,26 @@ var Miller = class {
     return this;
   }
   cut(fields) {
-    this.args.push(`cut -f ${fields[0].trim()}`);
+    const wihthQuotes = fields.map((f) => `"${f}"`);
+    this.args.push(`cut -f ${wihthQuotes.join(",")}`);
     return this;
   }
   head(count) {
     this.args.push(`head -n ${count}`);
     return this;
   }
+  determinePath() {
+    if (cwd().split("/").pop() === "muto") {
+      this.path = join(cwd(), "node_modules", ".bin", "mlr@v" + this.version);
+      return;
+    }
+    this.path = join(cwd(), "node_modules", "muto", "node_modules", ".bin", "mlr@v" + this.version);
+  }
 };
 function millerCmd() {
-  return new Miller();
+  const cmd = new Miller();
+  cmd.determinePath();
+  return cmd;
 }
 
 // lib/catalog.ts
@@ -567,6 +577,7 @@ import { createWriteStream } from "fs";
 import { execFile } from "child_process";
 function query(raw, opt) {
   return __async(this, null, function* () {
+    var _a;
     if (raw === void 0 || raw === "") {
       throw new Error("No query provided");
     }
@@ -576,12 +587,6 @@ function query(raw, opt) {
     }
     const catalog = yield createCatalog(opt);
     const plan = createPlan(catalog, query2.getStmt());
-    yield run(plan, catalog);
-  });
-}
-function run(plan, catalog) {
-  return __async(this, null, function* () {
-    var _a;
     console.log(`${plan.cmd} ${plan.args.join(" ")}`);
     const proc = execFile(plan.cmd, plan.args, {
       maxBuffer: 1024 * 1024 * 1024

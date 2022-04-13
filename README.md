@@ -23,13 +23,7 @@ await query("select * from albums", {
 });
 ```
 
-or install it globally
-
-```bash
-npm i muto -g
-```
-
-then use the CLI
+or use the CLI
 
 ```
 muto query "SELECT * FROM sales" -s ./path/to/sales.csv -d path/to/result.json
