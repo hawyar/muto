@@ -1,7 +1,6 @@
 import { join } from 'path'
 import { cwd } from 'process'
 
-// TODO: improve the type using template literals for the args
 class Miller {
   path: string
   version: string
