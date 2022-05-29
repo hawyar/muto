@@ -33,8 +33,6 @@ tap.test('create catalog, csv -> json', async (t) => {
   t.end()
 })
 
-
-
 tap.test('create catalog, csv -> json', async (t) => {
   const catalog = await createCatalog({
     source: path.join(dirname, 'fixture', 'players.csv'),

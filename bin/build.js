@@ -6,13 +6,13 @@ import os from 'os'
 import download from 'download'
 
 async function build () {
-  const semver = '6.0.0'
+  const semver = '6.2.0'
   const mlr = 'mlr@' + 'v' + semver
 
   const bin = path.join(process.cwd(), 'node_modules', '.bin', mlr)
 
   const osMap = {
-    darwin: 'darwin',
+    darwin: 'macos',
     linux: 'linux',
     win32: 'windows'
   }
@@ -21,7 +21,7 @@ async function build () {
     throw new Error('unsupported-platform: windows')
   }
 
-  const url = `https://github.com/johnkerl/miller/releases/download/v${semver}/miller_${semver}_${osMap[os.platform()]}_${os.arch()}.tar.gz`
+  const url = `https://github.com/johnkerl/miller/releases/download/v${semver}/miller-${semver}-${osMap[os.platform()]}-${os.arch()}.tar.gz`
 
   if (!fs.existsSync(bin)) {
     await download(url, path.join(process.cwd(), mlr), {
@@ -33,7 +33,7 @@ async function build () {
     })
       .finally(() => {
         console.log(`Downloaded mlr@v${semver} into ${bin}`)
-        fs.renameSync(path.join(process.cwd(), mlr, 'mlr'), bin)
+        fs.renameSync(path.join(process.cwd(), mlr, 'miller-' + semver + '-' + osMap[os.platform()] + '-' + os.arch(), 'mlr'), bin)
         fs.rm(path.join(process.cwd(), mlr), {
           recursive: true
         }, (err) => {
