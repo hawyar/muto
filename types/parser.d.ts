@@ -12,6 +12,13 @@ export interface Stmt {
             schemaname: string;
             relname: string;
             inh: string;
+            external: {
+                s3: {
+                    bucket: string;
+                    key: string;
+                    file: string;
+                };
+            };
         }
     ];
     sort: {};
@@ -40,10 +47,11 @@ declare class Parser {
         left: string;
         right: string;
     };
-    limit(): number;
+    getLimit(): number;
     getTable(): string;
     getType(): string;
     getGroupBy(): string[];
+    isExternal(): boolean;
     parse(): Stmt;
 }
 export declare function parser(query: string): Parser;

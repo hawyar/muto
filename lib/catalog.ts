@@ -22,8 +22,8 @@ interface Metadata {
   spanMultipleLines: boolean
   quotes: boolean
   delimiter: Delimiter
-  errors: { [key: string]: string }
-  warnings: { [key: string]: string }
+  errors?: { [key: string]: string }
+  warnings?: { [key: string]: string }
   preview?: string[][]
 }
 
@@ -49,13 +49,7 @@ export class Catalog {
     this.options = options
     this.createdAt = new Date()
     this.source = {
-      path: {
-        root: '',
-        dir: '',
-        base: '',
-        ext: '',
-        name: ''
-      },
+      path: path.parse(''),
       type: 'csv',
       columns: [],
       header: false,
@@ -63,19 +57,10 @@ export class Catalog {
       rowCount: 0,
       spanMultipleLines: false,
       quotes: false,
-      delimiter: ',',
-      errors: {},
-      warnings: {},
-      preview: []
+      delimiter: ','
     }
     this.destination = {
-      path: {
-        root: '',
-        dir: '',
-        base: '',
-        ext: '',
-        name: ''
-      },
+      path: path.parse(this.options.destination),
       type: 'csv',
       columns: [],
       header: false,
@@ -83,10 +68,7 @@ export class Catalog {
       rowCount: 0,
       spanMultipleLines: false,
       quotes: false,
-      delimiter: ',',
-      errors: {},
-      warnings: {},
-      preview: []
+      delimiter: ','
     }
   }
 
@@ -108,22 +90,26 @@ export class Catalog {
 
   async rowCount (): Promise<void> {
     const mlr = millerCmd()
+
+    if (this.source.type === 'json') {
+      return
+    }
     const args = mlr.getCmd() + ' ' + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(' ')
 
     const count = await execify(args)
 
     if (count.stderr !== '') {
-      throw new Error(`failed-to-get-row-count: ${count.stderr}`)
+      throw new Error(`failed to count rows: ${count.stderr}`)
     }
 
     const rowCount = JSON.parse(count.stdout)
 
     if (rowCount.length === 0) {
-      throw new Error('failed-to-get-row-count: no rows found')
+      throw new Error('failed to count rows: no rows found')
     }
 
     if (rowCount[0].count === undefined) {
-      throw new Error('failed-to-get-row-count: no count found')
+      throw new Error('failed to count rows: no count found')
     }
     this.source.rowCount = rowCount[0].count
   }
@@ -147,16 +133,14 @@ export class Catalog {
   }
 
   validateDestination (): void {
-    const dest = path.parse(this.options.destination)
-    if (dest.ext === '.csv') {
+    const ext = this.destination.path.ext
+    if (ext === '.csv') {
       this.destination.type = 'csv'
-      this.destination.path = dest
       return
     }
 
-    if (dest.ext === '.json') {
+    if (ext === '.json') {
       this.destination.type = 'json'
-      this.destination.path = dest
       return
     }
     throw new Error('Destination file extension is not supported')

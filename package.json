@@ -1,7 +1,7 @@
 {
   "name": "muto",
   "version": "1.0.0",
-  "description": "Run ad-hoc SQL query on CSV and JSON",
+  "description": "Run ad-hoc SQL query on CSV and JSON data",
   "author": "hawyar",
   "license": "MIT",
   "main": "dist/muto.js",

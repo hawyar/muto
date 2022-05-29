@@ -13,6 +13,13 @@ export interface Stmt {
     schemaname: string
     relname: string
     inh: string
+    external: {
+      s3: {
+        bucket: string
+        key: string
+        file: string
+      }
+    }
   }]
   sort: {}
   where: {
@@ -44,7 +51,15 @@ class Parser {
       from: [{
         schemaname: '',
         relname: '',
-        inh: ''
+        inh: '',
+        external: {
+          s3: {
+            bucket: '',
+            key: '',
+            file: ''
+
+          }
+        }
       }],
       sort: {},
       where: {
@@ -83,6 +98,9 @@ class Parser {
   }
 
   getTable (): string {
+    if (this.stmt.from[0].external.s3.bucket !== '') {
+      return 's3://' + this.stmt.from[0].external.s3.bucket + '/' + this.stmt.from[0].external.s3.key
+    }
     return this.stmt.from[0].relname
   }
 
@@ -92,6 +110,10 @@ class Parser {
 
   getGroupBy (): string[] {
     return this.stmt.groupBy
+  }
+
+  isExternal (): boolean {
+    return this.stmt.from[0].external.s3.bucket !== '' && this.stmt.from[0].external.s3.key !== ''
   }
 
   parse (): Stmt {
@@ -108,6 +130,7 @@ class Parser {
     }
 
     const ast = rawAST[0].RawStmt.stmt.SelectStmt
+
     const limit = ast.limitOption
 
     if (limit === 'LIMIT_OPTION_DEFAULT') {
@@ -152,7 +175,13 @@ class Parser {
         const source = {
           schemaname: '',
           relname: '',
-          inh: ''
+          inh: '',
+          external: {
+            s3: {
+              bucket: '',
+              key: ''
+            }
+          }
         }
 
         const t = from.RangeVar
@@ -169,13 +198,13 @@ class Parser {
           source.inh = t.inh
         }
 
+        if (source.relname.startsWith('s3://')) {
+          source.external.s3 = parseS3URI(source.relname)
+        }
+
         return source
       })
     }
-
-    // if (ast["sortClause"]) {
-    //     console.log(ast["sortClause"][0].SortBy)
-    // }
 
     if (ast.groupClause !== undefined) {
       const group = ast.groupClause.map((g: any) => {
@@ -227,6 +256,40 @@ class Parser {
     }
     return this.stmt
   }
+}
+
+interface S3URI {
+  bucket: string
+  key: string
+  file: string
+}
+
+function parseS3URI (uri: string): S3URI {
+  if (typeof uri !== 'string' || uri === '') throw new Error(`invalid or empty uri: ${uri}`)
+
+  if (!uri.startsWith('s3://') || uri.split(':/')[0] !== 's3') throw new Error('uri must start with "s3://"')
+
+  const result = {
+    bucket: '',
+    key: '',
+    file: ''
+  }
+
+  const src = uri.split(':/')[1]
+
+  const [bucket, ...keys] = src.split('/').splice(1)
+
+  if (bucket === '') throw new Error('bucket name cannot be empty')
+
+  result.bucket = bucket
+
+  result.key += keys.join('/')
+
+  if (result.key.split('.').length > 1) {
+    result.file = result.key.split('/').pop() ?? ''
+  }
+
+  return result
 }
 
 export function parser (query: string): Parser {

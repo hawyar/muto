@@ -1,8 +1,15 @@
 import { parser } from '../dist/muto.mjs'
 import tap from 'tap'
 
-tap.test('select *', async (t) => {
-  t.same('*', parser('select * from mytable').getColumns()[0])
+tap.test('select * from s3table', async (t) => {
+  const parsed = parser('select * from "s3://superbucket/more/files/stats.csv"')
+  t.same(parsed.getColumns()[0], "*")
+  t.same(parsed.getTable(), "s3://superbucket/more/files/stats.csv")
+  t.end()
+})
+
+tap.test('select item2, item4 from localtmp', async (t) => {
+  t.same(parser('select * from "../tmp/stats.csv"').getTable(), "../tmp/stats.csv")
   t.end()
 })
 
@@ -17,7 +24,7 @@ tap.test('distinct clause', async (t) => {
 })
 
 tap.test('limit clause', async (t) => {
-  t.same(5, parser('select team, score from dd limit 5').limit())
+  t.same(5, parser('select team, score from dd limit 5').getLimit())
   t.end()
 })
 
@@ -30,10 +37,13 @@ tap.test('where clause', async (t) => {
   t.end()
 })
 
-tap.test('select * from store where item == "green" group by color ', async (t) => {
-  t.same(['color', 'size'], parser('select * from store where item == "green" group by color, size').getGroupBy())
-  const f = parser('select id, track from "s3://mybuck/to/fodlder/albums.csv"')
-
-  console.log(JSON.stringify(f, null, 2))
+tap.test('select * from "s3://superbucket/more/files/stats.csv" where item == "green" group by color', async (t) => {
+  const parsed = parser('select * from "s3://superbucket/more/files/stats.csv" where item == "green" group by color')
+  t.same(parsed.getGroupBy(), ['color']);
+  t.same(parsed.getWhere(), {
+    left: 'item',
+    operator: '==',
+    right: 'green'
+  })
   t.end()
 })

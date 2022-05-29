@@ -2,6 +2,7 @@ import tap from 'tap'
 import path from 'path'
 import { createCatalog } from '../dist/muto.mjs'
 import { fileURLToPath } from 'url'
+import fs from 'fs/promises'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -30,20 +31,24 @@ tap.test('create catalog, csv -> json', async (t) => {
     'Total Profit'
   ])
   t.same(catalog.getDestination().path.base, 'sales.json')
+
+  fs.writeFile("./tmp.json", JSON.stringify(catalog, null, 2))
   t.end()
 })
 
-tap.test('create catalog, csv -> json', async (t) => {
-  const catalog = await createCatalog({
-    source: path.join(dirname, 'fixture', 'players.csv'),
-    destination: path.join(dirname, 'fixture', 'players.json'),
-    onEnd: () => {
-      console.log('done')
-    }
-  })
-  t.same(catalog.getDestination().path.base, 'players.json')
-  t.end()
-})
+// tap.test('create catalog, csv -> json', async (t) => {
+//   const catalog = await createCatalog({
+//     source: path.join(dirname, 'fixture', 'players.csv'),
+//     destination: path.join(dirname, 'fixture', 'players.json'),
+//     onEnd: () => {
+//       console.log('done')
+//     }
+//   })
+//   t.same(catalog.getDestination().path.base, 'players.json')
+
+//   await fs.writeFile("./tmp.json", JSON.stringify(catalog, null, 2))
+//   t.end()
+// })
 
 // tap.test('create catalog, json -> csv', async (t) => {
 //   const catalog = await createCatalog({

@@ -8,7 +8,7 @@ ${pc.bold('Usage:')}
     muto [command] [arg] [flags]
 
 ${pc.bold('Commands:')}
-    query   Query data using SQL
+    select   Query data from specified source (like SQL's SELECT)
 
 ${pc.bold('Flags:')}
     -s    --source        Path to the source file ${pc.bold('(required)')}

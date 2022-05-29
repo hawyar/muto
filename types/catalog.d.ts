@@ -12,10 +12,10 @@ interface Metadata {
     spanMultipleLines: boolean;
     quotes: boolean;
     delimiter: Delimiter;
-    errors: {
+    errors?: {
         [key: string]: string;
     };
-    warnings: {
+    warnings?: {
         [key: string]: string;
     };
     preview?: string[][];

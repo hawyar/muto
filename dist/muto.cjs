@@ -142,13 +142,7 @@ var Catalog = class {
     this.options = options;
     this.createdAt = new Date();
     this.source = {
-      path: {
-        root: "",
-        dir: "",
-        base: "",
-        ext: "",
-        name: ""
-      },
+      path: import_path2.default.parse(""),
       type: "csv",
       columns: [],
       header: false,
@@ -156,19 +150,10 @@ var Catalog = class {
       rowCount: 0,
       spanMultipleLines: false,
       quotes: false,
-      delimiter: ",",
-      errors: {},
-      warnings: {},
-      preview: []
+      delimiter: ","
     };
     this.destination = {
-      path: {
-        root: "",
-        dir: "",
-        base: "",
-        ext: "",
-        name: ""
-      },
+      path: import_path2.default.parse(this.options.destination),
       type: "csv",
       columns: [],
       header: false,
@@ -176,10 +161,7 @@ var Catalog = class {
       rowCount: 0,
       spanMultipleLines: false,
       quotes: false,
-      delimiter: ",",
-      errors: {},
-      warnings: {},
-      preview: []
+      delimiter: ","
     };
   }
   getSource() {
@@ -197,17 +179,20 @@ var Catalog = class {
   rowCount() {
     return __async(this, null, function* () {
       const mlr = millerCmd();
+      if (this.source.type === "json") {
+        return;
+      }
       const args = mlr.getCmd() + " " + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(" ");
       const count = yield execify(args);
       if (count.stderr !== "") {
-        throw new Error(`failed-to-get-row-count: ${count.stderr}`);
+        throw new Error(`failed to count rows: ${count.stderr}`);
       }
       const rowCount = JSON.parse(count.stdout);
       if (rowCount.length === 0) {
-        throw new Error("failed-to-get-row-count: no rows found");
+        throw new Error("failed to count rows: no rows found");
       }
       if (rowCount[0].count === void 0) {
-        throw new Error("failed-to-get-row-count: no count found");
+        throw new Error("failed to count rows: no count found");
       }
       this.source.rowCount = rowCount[0].count;
     });
@@ -228,15 +213,13 @@ var Catalog = class {
     });
   }
   validateDestination() {
-    const dest = import_path2.default.parse(this.options.destination);
-    if (dest.ext === ".csv") {
+    const ext = this.destination.path.ext;
+    if (ext === ".csv") {
       this.destination.type = "csv";
-      this.destination.path = dest;
       return;
     }
-    if (dest.ext === ".json") {
+    if (ext === ".json") {
       this.destination.type = "json";
-      this.destination.path = dest;
       return;
     }
     throw new Error("Destination file extension is not supported");
@@ -454,7 +437,14 @@ var Parser = class {
       from: [{
         schemaname: "",
         relname: "",
-        inh: ""
+        inh: "",
+        external: {
+          s3: {
+            bucket: "",
+            key: "",
+            file: ""
+          }
+        }
       }],
       sort: {},
       where: {
@@ -483,10 +473,13 @@ var Parser = class {
   getWhere() {
     return this.stmt.where;
   }
-  limit() {
+  getLimit() {
     return parseInt(this.stmt.limit.val);
   }
   getTable() {
+    if (this.stmt.from[0].external.s3.bucket !== "") {
+      return "s3://" + this.stmt.from[0].external.s3.bucket + "/" + this.stmt.from[0].external.s3.key;
+    }
     return this.stmt.from[0].relname;
   }
   getType() {
@@ -494,6 +487,9 @@ var Parser = class {
   }
   getGroupBy() {
     return this.stmt.groupBy;
+  }
+  isExternal() {
+    return this.stmt.from[0].external.s3.bucket !== "" && this.stmt.from[0].external.s3.key !== "";
   }
   parse() {
     var _a, _b;
@@ -540,7 +536,13 @@ var Parser = class {
         const source = {
           schemaname: "",
           relname: "",
-          inh: ""
+          inh: "",
+          external: {
+            s3: {
+              bucket: "",
+              key: ""
+            }
+          }
         };
         const t = from.RangeVar;
         if (t.schemaname !== void 0) {
@@ -551,6 +553,9 @@ var Parser = class {
         }
         if (t.inh !== void 0) {
           source.inh = t.inh;
+        }
+        if (source.relname.startsWith("s3://")) {
+          source.external.s3 = parseS3URI(source.relname);
         }
         return source;
       });
@@ -595,6 +600,28 @@ var Parser = class {
     return this.stmt;
   }
 };
+function parseS3URI(uri) {
+  var _a;
+  if (typeof uri !== "string" || uri === "")
+    throw new Error(`invalid or empty uri: ${uri}`);
+  if (!uri.startsWith("s3://") || uri.split(":/")[0] !== "s3")
+    throw new Error('uri must start with "s3://"');
+  const result = {
+    bucket: "",
+    key: "",
+    file: ""
+  };
+  const src = uri.split(":/")[1];
+  const [bucket, ...keys] = src.split("/").splice(1);
+  if (bucket === "")
+    throw new Error("bucket name cannot be empty");
+  result.bucket = bucket;
+  result.key += keys.join("/");
+  if (result.key.split(".").length > 1) {
+    result.file = (_a = result.key.split("/").pop()) != null ? _a : "";
+  }
+  return result;
+}
 function parser(query2) {
   const p = new Parser(query2);
   p.parse();
@@ -607,13 +634,11 @@ var import_child_process2 = require("child_process");
 function query(raw, opt) {
   return __async(this, null, function* () {
     var _a;
-    if (raw === void 0 || raw === "") {
-      throw new Error("No query provided");
-    }
     const query2 = parser(raw);
     if (query2.getType() !== "select") {
       throw new Error("Only select queries are supported at this time");
     }
+    console.log(query2.getStmt());
     const catalog = yield createCatalog(opt);
     const plan = createPlan(catalog, query2.getStmt());
     console.log(`${plan.cmd} ${plan.args.join(" ")}`);
