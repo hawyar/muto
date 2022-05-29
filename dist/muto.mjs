@@ -32,7 +32,7 @@ import { join } from "path";
 import { cwd } from "process";
 var Miller = class {
   constructor() {
-    this.version = "6.0.0";
+    this.version = "6.2.0";
     this.path = "";
     this.args = [];
   }

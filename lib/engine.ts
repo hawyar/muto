@@ -5,15 +5,13 @@ import { createWriteStream } from 'fs'
 import { execFile } from 'child_process'
 
 async function query (raw: string, opt: CatalogOptions): Promise<void> {
-  if (raw === undefined || raw === '') {
-    throw new Error('No query provided')
-  }
-
   const query = parser(raw)
 
   if (query.getType() !== 'select') {
     throw new Error('Only select queries are supported at this time')
   }
+
+  console.log(query.getStmt())
 
   const catalog = await createCatalog(opt)
 

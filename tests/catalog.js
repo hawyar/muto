@@ -13,7 +13,7 @@ tap.test('create catalog, csv -> json', async (t) => {
       console.log('done')
     }
   })
-  t.same( catalog.getColumns(), [
+  t.same(catalog.getColumns(), [
     'Region',
     'Country',
     'Item Type',
@@ -45,7 +45,6 @@ tap.test('create catalog, csv -> json', async (t) => {
   t.end()
 })
 
-
 // tap.test('create catalog, json -> csv', async (t) => {
 //   const catalog = await createCatalog({
 //     source: path.join(dirname, 'fixture', 'sales.csv'),
@@ -73,4 +72,3 @@ tap.test('create catalog, csv -> json', async (t) => {
 //   t.same(catalog.getDestination().path.base, 'sales.json')
 //   t.end()
 // })
-

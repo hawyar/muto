@@ -47,6 +47,7 @@ async function build () {
     console.log('Miller already installed')
   }
 
+  // minify is off for better debugging
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
     // minify: true,

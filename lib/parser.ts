@@ -78,7 +78,7 @@ class Parser {
     return this.stmt.where
   }
 
-  limit (): number {
+  getLimit (): number {
     return parseInt(this.stmt.limit.val)
   }
 

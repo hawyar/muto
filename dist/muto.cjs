@@ -61,7 +61,7 @@ var import_path = require("path");
 var import_process = require("process");
 var Miller = class {
   constructor() {
-    this.version = "6.0.0";
+    this.version = "6.2.0";
     this.path = "";
     this.args = [];
   }

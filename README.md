@@ -1,4 +1,4 @@
-## muto
+# muto
 
 > Run ad-hoc SQL query on CSV and JSON
 
@@ -6,11 +6,10 @@
 
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
-**Note**: not uploaded to the the npm registry yet
-
 ## Usage
 
 ```bash
+
 npm i muto
 ```
 

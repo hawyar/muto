@@ -32,5 +32,8 @@ tap.test('where clause', async (t) => {
 
 tap.test('select * from store where item == "green" group by color ', async (t) => {
   t.same(['color', 'size'], parser('select * from store where item == "green" group by color, size').getGroupBy())
+  const f = parser('select id, track from "s3://mybuck/to/fodlder/albums.csv"')
+
+  console.log(JSON.stringify(f, null, 2))
   t.end()
 })
