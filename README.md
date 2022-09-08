@@ -1,12 +1,17 @@
-# muto
+## muto
 
 > Run ad-hoc SQL query on CSV and JSON
 
-[//]: # (![tests]&#40;https://github.com/hawyar/muto/actions/workflows/test.yml/badge.svg&#41;)
-[![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
+### Usage
 
-## Usage
+```js
+import { query } from "muto";
+
+await query('select * from "s3://superbucket/stats.csv" to "./result.json"')
+```
+
+or use the CLI
 
 ```bash
-muto query 'SELECT * FROM "s3://mysuperbucket/2021/stats.csv"'
+muto query 'select * from "s3://superbucket/stats.csv" to "./result.json"'
 ```
