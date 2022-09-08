@@ -1,11 +1,10 @@
 node_modules
 .idea
 .DS_Store
-.env.*
+.env
 docs
 tests/example
-.muto-cache
 coverage
 .nyc_output
-.nova
 .vscode
+*.csv

@@ -127,8 +127,6 @@ export class Catalog {
     rl.on('line', line => {
       if (row === 0) {
         const items = line.split(',')
-        console.log(items)
-
         items.forEach(item => {
           if (item.match(/"(.*?)"/g) !== null && item.match(/'(.*?)'/g) !== null) {
             this.metadata.quotes = true

@@ -19,7 +19,6 @@ class Analyzer {
       args: []
     }
   }
-
   analyze (): ExecutePlan {
     const mlr = millerCmd()
 
@@ -34,8 +33,6 @@ class Analyzer {
     }
 
     const table = this.stmt.from[0].relname
-    console.log('table:', table)
-
     const source = this.catalog.options.source
 
     if (this.stmt.columns.length === 1) {
@@ -71,7 +68,7 @@ class Analyzer {
       return this.plan
     }
 
-    throw Error('Error: no columns specified')
+    throw Error('no columns specified')
   }
 }
 
