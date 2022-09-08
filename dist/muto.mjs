@@ -1,22 +1,3 @@
-var __defProp = Object.defineProperty;
-var __defProps = Object.defineProperties;
-var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
-var __getOwnPropSymbols = Object.getOwnPropertySymbols;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __propIsEnum = Object.prototype.propertyIsEnumerable;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __spreadValues = (a, b) => {
-  for (var prop in b || (b = {}))
-    if (__hasOwnProp.call(b, prop))
-      __defNormalProp(a, prop, b[prop]);
-  if (__getOwnPropSymbols)
-    for (var prop of __getOwnPropSymbols(b)) {
-      if (__propIsEnum.call(b, prop))
-        __defNormalProp(a, prop, b[prop]);
-    }
-  return a;
-};
-var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
@@ -40,7 +21,6 @@ var __async = (__this, __arguments, generator) => {
 
 // lib/catalog.ts
 import { createInterface } from "readline";
-import os from "os";
 import { constants, createReadStream } from "fs";
 import { exec } from "child_process";
 import util from "util";
@@ -51,7 +31,7 @@ import { join } from "path";
 import { cwd } from "process";
 var Miller = class {
   constructor() {
-    this.version = "6.2.0";
+    this.version = "6.4.0";
     this.path = "";
     this.args = [];
   }
@@ -126,59 +106,27 @@ function millerCmd() {
 }
 
 // lib/catalog.ts
+import path from "path";
 var execify = util.promisify(exec);
 var Catalog = class {
   constructor(opt) {
     this.options = opt;
     this.metadata = {
-      source: this.options.source,
-      destination: this.options.destination,
-      type: this.options.output,
+      source: opt.source,
+      destination: opt.destination,
+      type: opt.outputFormat || "json" /* JSON */,
+      header: false,
       columns: [],
-      header: this.options.header,
-      fileSize: 0,
       rowCount: 0,
+      fileSize: 0,
       spanMultipleLines: false,
       quotes: false,
-      delimiter: this.options.delimiter,
-      preview: []
+      delimiter: opt.delimiter || "," /* Comma */,
+      sanitizedColumnName: []
     };
-  }
-  getSource() {
-    return this.metadata.source;
-  }
-  getDestination() {
-    return this.metadata.destination;
-  }
-  getColumns() {
-    return this.metadata.columns;
-  }
-  rowCount() {
-    return __async(this, null, function* () {
-      const mlr = millerCmd();
-      if (this.metadata.type === "json") {
-        return;
-      }
-      const args = mlr.getCmd() + " " + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(" ");
-      const count = yield execify(args);
-      if (count.stderr !== "") {
-        throw new Error(`failed to count rows: ${count.stderr}`);
-      }
-      const rowCount = JSON.parse(count.stdout);
-      if (rowCount.length === 0) {
-        throw new Error("failed to count rows: no rows found");
-      }
-      if (rowCount[0].count === void 0) {
-        throw new Error("failed to count rows: no count found");
-      }
-      this.metadata.rowCount = rowCount[0].count;
-    });
   }
   validateSource() {
     return __async(this, null, function* () {
-      console.log("validating source");
-      console.log(this.options.source);
-      console.log(this.options.source.split("://"));
       if (this.options.source.split("://")[0] === "s3") {
         this.metadata.source = this.options.source;
       } else {
@@ -196,54 +144,25 @@ var Catalog = class {
       }
     });
   }
-  validateDestination() {
+  rowCount() {
     return __async(this, null, function* () {
-      if (this.metadata.destination.startsWith("../") || this.metadata.destination.startsWith("./")) {
-        const fstat = yield stat(this.options.source);
-        if (!fstat.isFile()) {
-          throw Error("Source path is not a file");
-        }
-        yield access(this.options.source, constants.R_OK).catch(() => {
-          throw Error("Source file is not readable");
-        });
-        if (fstat.size === 0) {
-          throw Error("Source file is empty");
-        }
-      }
-      throw new Error("Destination file extension is not supported");
-    });
-  }
-  fileType() {
-    return __async(this, null, function* () {
-      if (os.platform() !== "linux" && os.platform() !== "darwin") {
-        throw new Error("Unsupported platform");
-      }
-      const { stdout, stderr } = yield execify(`file ${this.options.source} --mime-type`);
-      if (stderr !== "") {
-        throw new Error(stderr);
-      }
-      const mimeType = stdout.split(":")[1].trim();
-      if (mimeType === "application/json") {
-        this.metadata.type = "json";
+      const mlr = millerCmd();
+      if (this.metadata.type === "json" /* JSON */) {
         return;
       }
-      if (mimeType === "application/csv") {
-        this.metadata.type = "csv";
-        return;
+      const args = mlr.getCmd() + " " + mlr.jsonOutput().count().fileSource(this.options.source).getArgs().join(" ");
+      const count = yield execify(args);
+      if (count.stderr !== "") {
+        throw new Error(`failed to count rows: ${count.stderr}`);
       }
-      if (mimeType === "application/json") {
-        this.metadata.type = "json";
-        return;
+      const rowCount = JSON.parse(count.stdout);
+      if (rowCount.length === 0) {
+        throw new Error("failed to count rows: no rows found");
       }
-      if (mimeType === "text/csv") {
-        this.metadata.type = "csv";
-        return;
+      if (rowCount[0].count === void 0) {
+        throw new Error("failed to count rows: no count found");
       }
-      if (mimeType === "text/plain") {
-        this.metadata.type = "csv";
-        return;
-      }
-      throw new Error("Unsupported file type");
+      this.metadata.rowCount = rowCount[0].count;
     });
   }
   fileSize() {
@@ -252,8 +171,8 @@ var Catalog = class {
       this.metadata.fileSize = fstat.size;
     });
   }
-  sanitizeColumnNames(columns) {
-    return columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
+  sanitizeColumnNames() {
+    return this.metadata.sanitizedColumnName = this.metadata.columns.map((column) => column.replace(/[^a-zA-Z0-9]/g, "_"));
   }
   hasQuotes() {
     return __async(this, null, function* () {
@@ -263,7 +182,7 @@ var Catalog = class {
       let row = 0;
       rl.on("line", (line) => {
         if (row === 0) {
-          const items = line.split(this.options.delimiter);
+          const items = line.split(",");
           console.log(items);
           items.forEach((item) => {
             if (item.match(/"(.*?)"/g) !== null && item.match(/'(.*?)'/g) !== null) {
@@ -292,6 +211,7 @@ var Catalog = class {
           this.metadata.columns.push(columns[0][c]);
         }
         this.metadata.header = true;
+        this.sanitizeColumnNames();
         return;
       }
       if (this.metadata.type === "json") {
@@ -309,24 +229,10 @@ var Catalog = class {
           this.metadata.columns.push(c);
         }
         this.metadata.header = true;
+        this.sanitizeColumnNames();
         return;
       }
       throw new Error("Failed to get header column");
-    });
-  }
-  preview() {
-    return __async(this, null, function* () {
-      const mlr = millerCmd();
-      const args = mlr.getCmd() + mlr.jsonOutput().head(5).fileSource(this.options.source).getArgs().join(" ");
-      const preview = yield execify(args);
-      if (preview.stderr !== "") {
-        throw new Error(preview.stderr);
-      }
-      const rows = JSON.parse(preview.stdout);
-      if (rows.length === 0) {
-        throw new Error("failed-to-get-preview: no rows found");
-      }
-      this.metadata.preview = rows;
     });
   }
 };
@@ -334,20 +240,35 @@ function createCatalog(opt) {
   return __async(this, null, function* () {
     return yield new Promise((resolve, reject) => {
       if (opt === void 0) {
-        reject(new Error("missing options"));
+        reject("missing options");
       }
       if (opt.source === void 0 || opt.source === "") {
-        reject(new Error("failed to create catalog: missing source"));
+        reject("failed to create catalog: missing source");
       }
       if (opt.destination === void 0 || opt.destination === "") {
-        reject(new Error("failed to create catalog: missing destination"));
+        reject("failed to create catalog: missing destination");
       }
-      const catalogOpt = Object.assign({}, opt);
-      if (opt.source.startsWith("s3://")) {
-        console.log("22");
+      const catalogOpt = {
+        source: opt.source,
+        destination: opt.destination,
+        inputFormat: "csv" /* CSV */,
+        outputFormat: "csv" /* CSV */,
+        delimiter: opt.delimiter || "," /* Comma */
+      };
+      if (opt.inputFormat === void 0) {
+        switch (path.extname(opt.source)) {
+          case ".csv":
+            catalogOpt.inputFormat = "csv" /* CSV */;
+            break;
+          case ".json":
+            catalogOpt.inputFormat = "json" /* JSON */;
+            break;
+          default:
+            reject(new Error("failed to create catalog: unsupported source file type"));
+        }
       }
       const c = new Catalog(catalogOpt);
-      Promise.all([c.validateSource(), c.validateDestination(), c.hasQuotes(), c.fileType(), c.rowCount(), c.fileSize(), c.columnHeader()]).then(() => {
+      Promise.all([c.validateSource(), c.hasQuotes(), c.rowCount(), c.fileSize(), c.columnHeader()]).then(() => {
         resolve(c);
       }).catch((err) => {
         reject(err);
@@ -385,7 +306,7 @@ var Analyzer = class {
         return this.plan;
       }
       const singleField = this.stmt.columns[0].name;
-      if (!this.catalog.source.columns.includes(singleField)) {
+      if (!this.catalog.metadata.columns.includes(singleField)) {
         throw new Error(`Column not found,  ${singleField}`);
       }
       console.log("columns:", this.stmt.columns[0].name);
@@ -394,7 +315,7 @@ var Analyzer = class {
     }
     if (this.stmt.columns.length > 1) {
       const fields = this.stmt.columns.map((column) => {
-        if (!this.catalog.source.columns.includes(column.name)) {
+        if (!this.catalog.metadata.columns.includes(column.name)) {
           throw new Error(`column ${column.name} is not in the list of columns`);
         }
         return `"${column.name}"`;
@@ -617,19 +538,42 @@ function parser(query2) {
 }
 
 // lib/engine.ts
-function query(raw, opt) {
+import { createWriteStream } from "fs";
+import { execFile } from "child_process";
+function query(raw) {
   return __async(this, null, function* () {
+    var _a;
     const query2 = parser(raw);
     if (query2.getType() !== "select") {
       throw new Error("Only select queries are supported at this time");
     }
-    const catalog = yield createCatalog(__spreadProps(__spreadValues({}, opt), {
-      source: query2.getTable()
-    }));
+    const catalog = yield createCatalog({
+      source: query2.getTable(),
+      destination: "./tmp.json"
+    });
     const plan = createPlan(catalog, query2.getStmt());
-    console.log(`${plan.cmd} ${plan.args.join(" ")}`);
+    console.log(plan);
+    const proc = execFile(plan.cmd, plan.args, {
+      maxBuffer: 1024 * 1024 * 1024
+    }, (err, stdout, stderr) => {
+      if (err != null) {
+        console.error(err);
+      }
+      if (stderr !== "") {
+        console.error(stderr);
+      }
+    });
+    if (proc.stdout != null) {
+      (_a = proc.stdout) == null ? void 0 : _a.pipe(createWriteStream(catalog.metadata.destination));
+    }
   });
 }
+function main() {
+  return __async(this, null, function* () {
+    yield query('select * from "./tests/fixture/csv/sales.csv"');
+  });
+}
+main();
 export {
   createCatalog,
   parser,

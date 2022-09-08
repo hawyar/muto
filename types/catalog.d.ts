@@ -1,45 +1,41 @@
-declare type Delimiter = ',';
-declare type DataType = 'csv' | 'json';
+declare enum Delimiter {
+    Comma = ","
+}
+declare enum Format {
+    CSV = "csv",
+    JSON = "json"
+}
 interface Metadata {
     source: string;
     destination: string;
-    type: DataType;
-    columns: string[];
+    type: Format;
     header: boolean;
-    fileSize: number;
+    columns: string[];
     rowCount: number;
+    fileSize: number;
     spanMultipleLines: boolean;
     quotes: boolean;
     delimiter: Delimiter;
-    preview?: string[][];
+    sanitizedColumnName: string[];
 }
 export interface CatalogOptions {
-    input: DataType;
     source: string;
     destination: string;
-    columns: string[];
-    header: boolean;
-    quotes: boolean;
-    output: DataType;
-    delimiter: Delimiter;
+    inputFormat?: Format;
+    outputFormat?: Format;
+    delimiter?: Delimiter;
     onEnd?: () => void;
 }
 export declare class Catalog {
     options: CatalogOptions;
     metadata: Metadata;
     constructor(opt: CatalogOptions);
-    getSource(): string;
-    getDestination(): string;
-    getColumns(): string[];
-    rowCount(): Promise<void>;
     validateSource(): Promise<void>;
-    validateDestination(): Promise<void>;
-    fileType(): Promise<void>;
+    rowCount(): Promise<void>;
     fileSize(): Promise<void>;
-    sanitizeColumnNames(columns: string[]): string[];
+    sanitizeColumnNames(): string[];
     hasQuotes(): Promise<void>;
     columnHeader(): Promise<void>;
-    preview(): Promise<void>;
 }
 export declare function createCatalog(opt: CatalogOptions): Promise<Catalog>;
 export {};

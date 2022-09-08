@@ -34,6 +34,7 @@ export interface Stmt {
     type: string
     val: string
   }
+  to: string
 }
 
 class Parser {
@@ -57,7 +58,6 @@ class Parser {
             bucket: '',
             key: '',
             file: ''
-
           }
         }
       }],
@@ -69,6 +69,7 @@ class Parser {
       },
       groupBy: [],
       having: [],
+      to: '',
       orderBy: [],
       limit: {
         type: '',
@@ -97,6 +98,10 @@ class Parser {
     return parseInt(this.stmt.limit.val)
   }
 
+  getDestination(): string {
+    return this.stmt.to
+  }
+
   getTable (): string {
     if (this.stmt.from[0].external.s3.bucket !== '') {
       return 's3://' + this.stmt.from[0].external.s3.bucket + '/' + this.stmt.from[0].external.s3.key
@@ -120,10 +125,13 @@ class Parser {
     const raw = this.query
 
     if (raw.trim() === '') {
-      throw new Error('invalid-query: no query found')
+      throw new Error('query is required')
     }
 
-    const rawAST = sqlParser(raw)
+    const [cleaned, toClause] = raw.split("to")
+    this.stmt.to = toClause.replace(/"/g, '').trim()
+
+    const rawAST = sqlParser(cleaned)
 
     if (Object.keys(rawAST[0].RawStmt.stmt)[0] === 'SelectStmt') {
       this.stmt.type = 'select'
@@ -292,7 +300,7 @@ function parseS3URI (uri: string): S3URI {
   return result
 }
 
-export function parser (query: string): Parser {
+export function sqlStatementParser (query: string): Parser {
   const p = new Parser(query)
   p.parse()
   return p

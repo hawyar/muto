@@ -6,7 +6,7 @@ class Miller {
   version: string
   args: string[]
   constructor () {
-    this.version = '6.2.0'
+    this.version = '6.4.0'
     this.path = ''
     this.args = []
   }

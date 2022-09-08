@@ -3,7 +3,7 @@
   "exclude": ["node_modules", "dist", "test"],
   "compilerOptions": {
     "declaration": true,
-    "module": "es2020",
+    "module": "commonjs",
     "moduleResolution": "node",
     "baseUrl": ".",
     "declarationDir": "./types",
