@@ -1,7 +1,7 @@
 import { parser } from '../dist/muto.mjs'
 import tap from 'tap'
 
-tap.test('select * from s3table', async (t) => {
+tap.test('select * from s3', async (t) => {
   const parsed = parser('select * from "s3://superbucket/more/files/stats.csv"')
   t.same(parsed.getColumns()[0], "*")
   t.same(parsed.getTable(), "s3://superbucket/more/files/stats.csv")
@@ -37,7 +37,7 @@ tap.test('where clause', async (t) => {
   t.end()
 })
 
-tap.test('select * from "s3://superbucket/more/files/stats.csv" where item == "green" group by color', async (t) => {
+tap.test('external source with where clause', async (t) => {
   const parsed = parser('select * from "s3://superbucket/more/files/stats.csv" where item == "green" group by color')
   t.same(parsed.getGroupBy(), ['color']);
   t.same(parsed.getWhere(), {

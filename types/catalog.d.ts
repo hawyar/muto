@@ -1,9 +1,8 @@
-/// <reference types="node" />
-import { ParsedPath } from 'path';
 declare type Delimiter = ',';
 declare type DataType = 'csv' | 'json';
 interface Metadata {
-    path: ParsedPath;
+    source: string;
+    destination: string;
     type: DataType;
     columns: string[];
     header: boolean;
@@ -12,12 +11,6 @@ interface Metadata {
     spanMultipleLines: boolean;
     quotes: boolean;
     delimiter: Delimiter;
-    errors?: {
-        [key: string]: string;
-    };
-    warnings?: {
-        [key: string]: string;
-    };
     preview?: string[][];
 }
 export interface CatalogOptions {
@@ -32,21 +25,19 @@ export interface CatalogOptions {
     onEnd?: () => void;
 }
 export declare class Catalog {
-    source: Metadata;
-    destination: Metadata;
     options: CatalogOptions;
-    createdAt: Date;
-    constructor(options: CatalogOptions);
-    getSource(): Metadata;
-    getDestination(): Metadata;
-    getOptions(): CatalogOptions;
+    metadata: Metadata;
+    constructor(opt: CatalogOptions);
+    getSource(): string;
+    getDestination(): string;
     getColumns(): string[];
     rowCount(): Promise<void>;
     validateSource(): Promise<void>;
-    validateDestination(): void;
+    validateDestination(): Promise<void>;
     fileType(): Promise<void>;
     fileSize(): Promise<void>;
     sanitizeColumnNames(columns: string[]): string[];
+    hasQuotes(): Promise<void>;
     columnHeader(): Promise<void>;
     preview(): Promise<void>;
 }

@@ -25,6 +25,7 @@
     "fix": "npx ts-standard --fix && npx standard --fix ./tests/**/*.js"
   },
   "devDependencies": {
+    "@octokit/rest": "^19.0.4",
     "@tsconfig/recommended": "^1.0.1",
     "@types/node": "^17.0.23",
     "@types/npm-paths": "^2.0.0",

@@ -1,4 +1,4 @@
-import { createCatalog, CatalogOptions } from './catalog'
+import { createCatalog, CatalogOptions, Catalog } from './catalog'
 import { createPlan } from './analyzer'
 import { parser } from './parser'
 import { createWriteStream } from 'fs'
@@ -11,28 +11,29 @@ async function query (raw: string, opt: CatalogOptions): Promise<void> {
     throw new Error('Only select queries are supported at this time')
   }
 
-  console.log(query.getStmt())
-
-  const catalog = await createCatalog(opt)
+  const catalog = await createCatalog({
+    ...opt,
+    source: query.getTable()
+  })
 
   const plan = createPlan(catalog, query.getStmt())
 
   console.log(`${plan.cmd} ${plan.args.join(' ')}`)
-  const proc = execFile(plan.cmd, plan.args, {
-    maxBuffer: 1024 * 1024 * 1024
-  }, (err, stdout, stderr) => {
-    if (err != null) {
-      console.error(err)
-    }
+  // const proc = execFile(plan.cmd, plan.args, {
+  //   maxBuffer: 1024 * 1024 * 1024
+  // }, (err, stdout, stderr) => {
+  //   if (err != null) {
+  //     console.error(err)
+  //   }
 
-    if (stderr !== '') {
-      console.error(stderr)
-    }
-  })
+  //   if (stderr !== '') {
+  //     console.error(stderr)
+  //   }
+  // })
 
-  if (proc.stdout != null) {
-    proc.stdout?.pipe(createWriteStream(catalog.getOptions().destination))
-  }
+  // if (proc.stdout != null) {
+  //   proc.stdout?.pipe(createWriteStream(catalog.getOptions().destination))
+  // }
 }
 
 export {

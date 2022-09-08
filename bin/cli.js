@@ -8,16 +8,13 @@ ${pc.bold('Usage:')}
     muto [command] [arg] [flags]
 
 ${pc.bold('Commands:')}
-    select   Query data from specified source (like SQL's SELECT)
+    select   Query data from specified source (basically SQL's SELECT)
 
 ${pc.bold('Flags:')}
-    -s    --source        Path to the source file ${pc.bold('(required)')}
     -d    --destination   The destination where the result will be written to ${pc.bold('(required)')}
 
     -i    --input         Input format, defaults to the extension of the source file
-    -o    --output        Output format, defa
-
-    -n    --name          Name of the query, defaults to the name of the source file
+    -o    --output        Output format, defaults to the extension of the destination file
 
     -v    --version       Print version
     -h    --help          Print help (what you are reading now)
@@ -30,19 +27,15 @@ async function run () {
   const args = arg({
     '--help': Boolean,
     '--version': Boolean,
-    '--source': String,
     '--destination': String,
     '--input': String,
     '--output': String,
-    '--name': String,
 
     '-h': '--help',
     '-v': '--version',
-    '-s': '--source',
     '-d': '--destination',
     '-i': '--input',
     '-o': '--output',
-    '-n': '--name'
   })
 
   if (args['--help']) {
@@ -70,22 +63,9 @@ async function run () {
     process.exit(0)
   }
 
-  if (!args['--source']) {
-    print(`${pc.red('Error: ')} Missing source, see ${pc.bold('muto --help')}`)
-    process.exit(0)
-  }
-
   if (!args['--destination']) {
     print(`${pc.red('Error: ')} Missing destination, see ${pc.bold('muto --help')}`)
     process.exit(0)
-  }
-
-  const input = {
-    input: args['--input'] || '',
-    output: args['--output'] || '',
-    name: args['--name'] || '',
-    source: args['--source'],
-    destination: args['--destination']
   }
 
   if (args._[1] === '') {
@@ -93,7 +73,9 @@ async function run () {
     process.exit(1)
   }
 
-  await query(args._[1], input).catch(err => {
+  await query(args._[1], {
+    destination: args['--destination'],
+  }).catch(err => {
     print(`${pc.red('Error: ')} ${err.message}`)
     process.exit(1)
   })

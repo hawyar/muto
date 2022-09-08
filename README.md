@@ -9,21 +9,5 @@
 ## Usage
 
 ```bash
-
-npm i muto
-```
-
-```javascript
-import { query } from "muto";
-
-await query("select * from albums", {
-  source: "/path/to/file.csv",
-  destination: "./result.json",
-});
-```
-
-or use the CLI
-
-```
-muto query "SELECT * FROM sales" -s ./path/to/sales.csv -d path/to/result.json
+muto query 'SELECT * FROM "s3://mysuperbucket/2021/stats.csv"'
 ```

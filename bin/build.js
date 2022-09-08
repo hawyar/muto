@@ -2,52 +2,51 @@ import path from 'path'
 import esbuild from 'esbuild'
 import { nodeExternalsPlugin } from 'esbuild-node-externals'
 import fs from 'fs'
-import os from 'os'
 import download from 'download'
+import { Octokit } from "@octokit/rest"
 
 async function build () {
-  const semver = '6.2.0'
-  const mlr = 'mlr@' + 'v' + semver
+  const octo = new Octokit()
+  const { data: release } = await octo.repos.getLatestRelease({
+    owner: 'johnkerl',
+    repo: 'miller'
+  })
 
-  const bin = path.join(process.cwd(), 'node_modules', '.bin', mlr)
+  const latest = release.tag_name
 
-  const osMap = {
+  const bin = path.join(process.cwd(), 'node_modules', '.bin')
+  const files = await fs.promises.readdir(bin)
+
+  const platform = {
     darwin: 'macos',
     linux: 'linux',
     win32: 'windows'
   }
 
-  if (os.platform() === 'win32') {
-    throw new Error('unsupported-platform: windows')
-  }
+  const exists = files.filter((file) => file.startsWith('mlr'))[0]
+  const needed = `miller-${latest.replace('v', '')}-${platform[process.platform]}-${process.arch}`
+  const asset = release.assets.filter((asset) => asset.name === needed + ".tar.gz")[0]
 
-  const url = `https://github.com/johnkerl/miller/releases/download/v${semver}/miller-${semver}-${osMap[os.platform()]}-${os.arch()}.tar.gz`
-
-  if (!fs.existsSync(bin)) {
-    await download(url, path.join(process.cwd(), mlr), {
-      extract: true
-
-    }).catch((err) => {
-      console.error(err)
-      process.exit(1)
+  if (exists) {
+    const current = exists.split('@')[1]
+    if (current === latest) {
+      console.log('Miller is up to date')
+      return
+    }
+    console.log(`Updating Miller from ${current} to ${latest}`)
+    await download(asset.browser_download_url, "./", { extract: true }).then(() => {
+      fs.renameSync(path.join(process.cwd(), needed + "/mlr"), path.join(bin, `mlr@${latest}`))
+      fs.unlinkSync(path.join(bin, exists))
     })
-      .finally(() => {
-        console.log(`Downloaded mlr@v${semver} into ${bin}`)
-        fs.renameSync(path.join(process.cwd(), mlr, 'miller-' + semver + '-' + osMap[os.platform()] + '-' + os.arch(), 'mlr'), bin)
-        fs.rm(path.join(process.cwd(), mlr), {
-          recursive: true
-        }, (err) => {
-          if (err) {
-            console.error(err)
-            process.exit(1)
-          }
-        })
-      })
-  } else {
-    console.log('Miller already installed')
+    return
   }
 
-  // minify is off for better debugging
+  await download(asset.browser_download_url, "./", { extract: true }).then(() => {
+    fs.renameSync(path.join(process.cwd(), needed + "/mlr"), path.join(bin, `mlr@${latest}`))
+    // fs.unlinkSync(path.join(process.cwd(), needed))
+  })
+
+  // TODO: turn on minify
   const esm = await esbuild.build({
     entryPoints: [path.join(process.cwd(), 'lib/engine.ts')],
     // minify: true,
