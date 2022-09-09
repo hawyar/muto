@@ -1,9 +1,3 @@
-## muto
-
-> Run ad-hoc SQL query on CSV and JSON
-
-### Usage
-
 ```js
 import { query } from "muto";
 

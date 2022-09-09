@@ -5,9 +5,10 @@ import fs from 'fs'
 import download from 'download'
 import { Octokit } from "@octokit/rest"
 
-async function build () {
+
+const buildMiller = async () => {
   const octo = new Octokit()
-  const { data: release } = await octo.repos.getLatestRelease({
+  const {data: release} = await octo.repos.getLatestRelease({
     owner: 'johnkerl',
     repo: 'miller'
   })
@@ -34,17 +35,21 @@ async function build () {
       return
     }
     console.log(`Updating Miller from ${current} to ${latest}`)
-    await download(asset.browser_download_url, "./", { extract: true }).then(() => {
+    await download(asset.browser_download_url, "./", {extract: true}).then(() => {
       fs.renameSync(path.join(process.cwd(), needed + "/mlr"), path.join(bin, `mlr@${latest}`))
       fs.unlinkSync(path.join(bin, exists))
     })
     return
   }
 
-  await download(asset.browser_download_url, "./", { extract: true }).then(() => {
+  await download(asset.browser_download_url, "./", {extract: true}).then(() => {
     fs.renameSync(path.join(process.cwd(), needed + "/mlr"), path.join(bin, `mlr@${latest}`))
     // fs.unlinkSync(path.join(process.cwd(), needed))
   })
+}
+
+async function build () {
+  await buildMiller()
 
   // TODO: turn on minify
   const esm = await esbuild.build({
@@ -70,7 +75,6 @@ async function build () {
     outfile: path.join(process.cwd(), 'dist/muto.cjs'),
     plugins: [nodeExternalsPlugin()]
   })
-
   await Promise.all([cjs, esm]).catch((err) => {
     console.error(err)
     process.exit(1)

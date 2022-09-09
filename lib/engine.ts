@@ -16,6 +16,8 @@ async function query (raw: string): Promise<void> {
 
   const plan = createPlan(catalog, query.getStmt())
 
+  console.log(plan)
+
   const proc = execFile(plan.cmd, plan.args, {
     maxBuffer: 1024 * 1024 * 1024
   }, (err, stdout, stderr) => {
@@ -26,12 +28,10 @@ async function query (raw: string): Promise<void> {
     if (stderr !== '') throw new Error(stderr)
   })
 
-  // const out = createWriteStream(catalog.metadata.destination)
-  // if (proc.stdout != null) proc.stdout?.pipe(out)
+  const out = createWriteStream(catalog.metadata.destination)
+  if (proc.stdout != null) proc.stdout?.pipe(out)
 }
 
 export {
   query,
-  sqlStatementParser,
-  createCatalog
 }
